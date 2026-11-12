@@ -9,12 +9,15 @@ Example: `cmd+option+1` can always bring your "project-a" VS Code window to the 
 - Registers global shortcuts with native macOS APIs.
 - Finds a matching window by bundle ID, app identity, executable path, and optional window metadata matchers.
 - Unminimizes the window if needed and brings it to the front.
-- Keeps a text/rich-text clipboard history and pastes recent items from `cmd+shift+v`.
-- Pastes YAML-defined snippets from `cmd+shift+v` or `cmd+shift+b`.
+- Records text/rich-text clipboard history (last 200 items, persisted to `~/Library/Application Support/Shorty/ClipboardHistory.json`).
+- Opens a searchable clipboard history + snippets picker with `cmd+shift+v`, or a snippets-only picker with `cmd+shift+b`, and pastes the selection into the previously focused app.
+- Pastes YAML-defined snippets grouped into folders.
+- Opens a text command palette with `option+space` for epoch timestamp conversion, byte-unit conversion, and current time in several time zones.
 - Shows a lightweight window switcher with `cmd+tab`, plus a current-app window switcher with `cmd+tilde/backquote`.
 - Moves and resizes the focused window with Rectangle-style hardcoded shortcuts.
 - Reloads its YAML config file automatically when you save changes.
-- Runs as a menu bar utility with loaded shortcuts, `Show Windows`, `Reload Config`, `Reveal Config`, and `Quit`.
+- Runs as a menu bar utility showing status, config path, and loaded shortcuts, with `Show Windows`, `Reload Config`, `Reveal Config`, `Open Accessibility Settings`, and `Quit`.
+- CLI modes: `--list-windows [--verbose]`, `--validate-config`, `--config PATH`, `--help`.
 
 ## Requirements
 
@@ -167,16 +170,43 @@ snippets:
     Address: 123 Example St
 ```
 
-The group key becomes a submenu. The snippet key becomes the menu item title. The value is pasted as plain text. Groups and snippets appear in the same order as the config.
+The group key becomes a picker folder. The snippet key becomes the item title. The value is pasted as plain text. Groups and snippets appear in the same order as the config.
+
+### Clipboard History
+
+Shorty polls the pasteboard every 0.75s and stores new items, newest first, deduplicated by content. It keeps plain text plus RTF, RTFD, HTML, web archive, and other rich-text representations. Images, files, URLs, audio, and video representations are not stored. History holds up to 200 items and survives restarts.
 
 Shorty uses these hardcoded clipboard shortcuts:
 
-- `cmd+shift+v`: open a combined clipboard history and snippets menu.
-- `cmd+shift+b`: open a snippets-only menu.
+- `cmd+shift+v`: open the combined clipboard history and snippets picker.
+- `cmd+shift+b`: open the snippets-only picker.
 
-The clipboard menu shows the 20 most recent items directly, then up to 180 more items in 9 submenus of 20. Menu titles use the first line, preserve leading spaces, and are clipped to 60 characters.
+The picker is a floating panel with a search field. History shows the 20 most recent items directly, then up to 180 more in folders of 20 (`21 - 40`, …). Snippet groups appear as folders. Item titles use the first line, and multi-line items show a `+N` count of additional lines.
 
-Hold `cmd` while selecting a clipboard history item, including pressing `return`, to paste its plain-text version without formatting. Hold `shift` to trim every line, discard empty lines, join the remaining lines with no separator, save that transformed text as the newest history item, and paste it. If both `cmd` and `shift` are held, the `shift` behavior is used.
+Picker keys:
+
+- Type to filter history and snippets (case- and diacritic-insensitive; matches history text, snippet group, title, and content). Matching items inside folders are shown at the top level while searching.
+- `up` / `down`: move selection.
+- `right`: open the selected folder. `left`, `escape`, or `delete` with an empty search: leave the folder.
+- `escape` at the top level: close the picker.
+- `return`: paste the selected item into the app that was focused before the picker opened.
+- `cmd+return`: paste the plain-text version without formatting.
+- `shift+return`: trim every line, discard empty lines, join the remaining lines with no separator, save that transformed text as the newest history item, and paste it. If both `cmd` and `shift` are held, the `shift` behavior is used.
+
+### Command Palette
+
+`option+space` opens a floating command palette. As you type, every matching command shows a live result; partially typed commands show the remaining words as placeholders. `return` copies the first complete result to the clipboard and closes the palette. `escape` closes it.
+
+Commands:
+
+| Input | Result |
+| --- | --- |
+| 10-digit number, e.g. `1700000000` | Epoch seconds as UTC and San Francisco time, plus relative time (`2d 3h 4m 5s ago`) |
+| 14-digit number | Epoch milliseconds, same output |
+| `<amount> <unit>`, unit `b`/`bytes`/`kb`/`mb`/`gb`/`tb`, e.g. `1.5 gb` | The value in every other unit (1024-based) |
+| `utc time`, `et time`, `cet time`, `turkey time`, `dubai time`, `korea time`, `japan time` | Current time in that zone |
+
+Inside the palette, `cmd+v` pastes the system clipboard, `cmd+shift+v` / `cmd+shift+b` open the clipboard / snippets picker and insert the chosen item's plain text at the cursor, `cmd+c` copies the selection, and `cmd+a` selects all.
 
 ### Window Switcher
 
@@ -203,7 +233,7 @@ Shorty uses these hardcoded window movement shortcuts:
 
 Window movement uses each monitor's visible frame, so windows avoid the menu bar and Dock. Some full-screen, minimized, or non-resizable windows may refuse Accessibility resize commands.
 
-These hotkeys are reserved and cannot be reused by window shortcuts.
+All hardcoded hotkeys above (clipboard, snippets, command palette, window switcher, window movement) are reserved and cannot be reused by window shortcuts.
 
 ### Shortcut Fields
 
@@ -226,4 +256,3 @@ At least one matcher must be set: `bundle-id`, `app-name-regex`, `executable-pat
 - Cursor, Zed, and other editors may expose a more useful `document` or `url` than `title`; use `--list-windows --verbose` to inspect that first.
 - If you run multiple app installs with the same bundle ID, match the install directly with `executable-path-prefix` and leave out window-title matchers.
 - If a target app does not expose useful Accessibility window metadata, try combining `bundle-id` with a broader `title-regex`.
-- If you want, this can be wrapped into a signed `.app` bundle or a `launchd` agent next.
