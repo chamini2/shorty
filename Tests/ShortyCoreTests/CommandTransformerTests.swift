@@ -193,38 +193,48 @@ final class CommandTransformerTests: XCTestCase {
         XCTAssertFalse(results.contains { $0.transformerName == "Disk Size Units" })
     }
 
-    func testCurrentTimeCommandsUseInjectedDate() {
-        let now = Date(timeIntervalSince1970: 0)
-
-        let results = CommandTransformerEngine.evaluate("utc time", now: now)
-
-        XCTAssertEqual(results.first?.transformerName, "UTC Time")
-        XCTAssertEqual(results.first?.resultText, "1970-01-01 00:00:00 GMT")
+    /// Time zones moved into the catalog's Time group, so these cover the
+    /// string prefix machinery with a transformer of their own.
+    private var greetingTransformer: CommandTransformer {
+        CommandTransformer(name: "Greeting", parts: [.string("hello world")]) { _, _ in
+            "hi there"
+        }
     }
 
-    func testCurrentTimePrefixShowsRemainingStringAndResult() {
-        let now = Date(timeIntervalSince1970: 0)
-        let results = CommandTransformerEngine.evaluate("utc t", now: now)
+    func testStringCommandRunsOnAFullMatch() {
+        let results = CommandTransformerEngine.evaluate(
+            "hello world",
+            transformers: [greetingTransformer]
+        )
+
+        XCTAssertEqual(results.first?.transformerName, "Greeting")
+        XCTAssertEqual(results.first?.resultText, "hi there")
+    }
+
+    func testStringCommandPrefixShowsTheRemainder() {
+        let results = CommandTransformerEngine.evaluate(
+            "hello w",
+            transformers: [greetingTransformer]
+        )
 
         XCTAssertEqual(results.count, 1)
-        XCTAssertEqual(results[0].transformerName, "UTC Time")
-        XCTAssertEqual(results[0].displayText, "utc time")
+        XCTAssertEqual(results[0].displayText, "hello world")
         XCTAssertEqual(results[0].segments, [
-            CommandDisplaySegment(text: "utc t", kind: .matched),
-            CommandDisplaySegment(text: "ime", kind: .placeholder),
+            CommandDisplaySegment(text: "hello w", kind: .matched),
+            CommandDisplaySegment(text: "orld", kind: .placeholder),
         ])
-        XCTAssertEqual(results[0].resultText, "1970-01-01 00:00:00 GMT")
+        XCTAssertEqual(results[0].resultText, "hi there")
     }
 
-    func testCurrentTimeStringPrefixRunsTransformer() {
-        let now = Date(timeIntervalSince1970: 0)
-
-        let results = CommandTransformerEngine.evaluate("u", now: now)
+    func testStringCommandMatchesFromTheFirstLetter() {
+        let results = CommandTransformerEngine.evaluate(
+            "h",
+            transformers: [greetingTransformer]
+        )
 
         XCTAssertEqual(results.count, 1)
-        XCTAssertEqual(results[0].transformerName, "UTC Time")
-        XCTAssertEqual(results[0].displayText, "utc time")
-        XCTAssertEqual(results[0].resultText, "1970-01-01 00:00:00 GMT")
+        XCTAssertEqual(results[0].displayText, "hello world")
+        XCTAssertEqual(results[0].resultText, "hi there")
     }
 
     func testCurrentTimeSupportsRequestedZones() {

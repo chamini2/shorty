@@ -102,7 +102,7 @@ public enum CommandTransformerEngine {
 
             return formatByteConversions(amount: amount, inputUnit: inputUnit)
         },
-    ] + timeTransformers()
+    ]
 
     public static func evaluate(
         _ input: String,
@@ -327,27 +327,6 @@ public enum CommandTransformerEngine {
         segments.append(CommandDisplaySegment(text: text, kind: kind))
     }
 
-    private static func timeTransformers() -> [CommandTransformer] {
-        [
-            timeTransformer(command: "utc time", name: "UTC Time", timeZone: TimeZone(secondsFromGMT: 0)!),
-            timeTransformer(command: "et time", name: "ET Time", timeZone: TimeZone(identifier: "America/New_York")!),
-            timeTransformer(command: "cet time", name: "CET Time", timeZone: TimeZone(identifier: "Europe/Paris")!),
-            timeTransformer(command: "turkey time", name: "Turkey Time", timeZone: TimeZone(identifier: "Europe/Istanbul")!),
-            timeTransformer(command: "dubai time", name: "Dubai Time", timeZone: TimeZone(identifier: "Asia/Dubai")!),
-            timeTransformer(command: "korea time", name: "Korea Time", timeZone: TimeZone(identifier: "Asia/Seoul")!),
-            timeTransformer(command: "japan time", name: "Japan Time", timeZone: TimeZone(identifier: "Asia/Tokyo")!),
-        ]
-    }
-
-    private static func timeTransformer(command: String, name: String, timeZone: TimeZone) -> CommandTransformer {
-        CommandTransformer(
-            name: name,
-            parts: [.string(command)]
-        ) { _, now in
-            format(now, in: timeZone)
-        }
-    }
-
     static func formatUTCAndLocal(
         _ date: Date,
         now: Date,
@@ -368,6 +347,11 @@ public enum CommandTransformerEngine {
         \(utcLine)
         Local: \(format(date, in: localTimeZone)) (\(relative))
         """
+    }
+
+    /// Current wall clock in a zone, for the catalog's Time group.
+    public static func currentTime(in timeZone: TimeZone, now: Date = Date()) -> String {
+        format(now, in: timeZone)
     }
 
     private static func format(_ date: Date, in timeZone: TimeZone) -> String {

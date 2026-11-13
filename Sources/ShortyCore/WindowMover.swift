@@ -2,7 +2,7 @@ import AppKit
 @preconcurrency import ApplicationServices
 import Foundation
 
-public enum WindowMoveCommand: Sendable {
+public enum WindowMoveCommand: Equatable, Sendable {
     case cycleHalf(WindowMoveDirection)
     case maximize
     case moveToMonitor(WindowMoveDirection)
