@@ -97,7 +97,7 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertThrowsError(try ConfigurationLoader.load(from: url))
     }
 
-    func testRejectsReservedClipboardMenuHotkey() throws {
+    func testRejectsBoundClipboardMenuHotkey() throws {
         let url = try temporaryConfigURL(
             extension: "yaml",
             contents: """
@@ -109,11 +109,11 @@ final class ConfigurationTests: XCTestCase {
         )
 
         XCTAssertThrowsError(try ConfigurationLoader.load(from: url)) { error in
-            XCTAssertTrue(String(describing: error).contains("reserved"))
+            XCTAssertTrue(String(describing: error).contains("is used by both"))
         }
     }
 
-    func testRejectsReservedSnippetMenuHotkey() throws {
+    func testRejectsBoundSnippetMenuHotkey() throws {
         let url = try temporaryConfigURL(
             extension: "yaml",
             contents: """
@@ -125,11 +125,11 @@ final class ConfigurationTests: XCTestCase {
         )
 
         XCTAssertThrowsError(try ConfigurationLoader.load(from: url)) { error in
-            XCTAssertTrue(String(describing: error).contains("reserved"))
+            XCTAssertTrue(String(describing: error).contains("is used by both"))
         }
     }
 
-    func testRejectsReservedTextCommandHotkey() throws {
+    func testRejectsBoundTextCommandHotkey() throws {
         let hotkeys = ["alt+space", "option+space"]
 
         for hotkey in hotkeys {
@@ -143,13 +143,13 @@ final class ConfigurationTests: XCTestCase {
                 """
             )
 
-            XCTAssertThrowsError(try ConfigurationLoader.load(from: url), "Expected \(hotkey) to be reserved") { error in
-                XCTAssertTrue(String(describing: error).contains("reserved"))
+            XCTAssertThrowsError(try ConfigurationLoader.load(from: url), "Expected \(hotkey) to conflict") { error in
+                XCTAssertTrue(String(describing: error).contains("is used by both"))
             }
         }
     }
 
-    func testRejectsReservedWindowSwitcherHotkey() throws {
+    func testRejectsBoundWindowSwitcherHotkey() throws {
         let url = try temporaryConfigURL(
             extension: "yaml",
             contents: """
@@ -161,11 +161,11 @@ final class ConfigurationTests: XCTestCase {
         )
 
         XCTAssertThrowsError(try ConfigurationLoader.load(from: url)) { error in
-            XCTAssertTrue(String(describing: error).contains("reserved"))
+            XCTAssertTrue(String(describing: error).contains("is used by both"))
         }
     }
 
-    func testRejectsReservedCurrentAppWindowSwitcherHotkey() throws {
+    func testRejectsBoundCurrentAppWindowSwitcherHotkey() throws {
         let url = try temporaryConfigURL(
             extension: "yaml",
             contents: """
@@ -177,11 +177,11 @@ final class ConfigurationTests: XCTestCase {
         )
 
         XCTAssertThrowsError(try ConfigurationLoader.load(from: url)) { error in
-            XCTAssertTrue(String(describing: error).contains("reserved"))
+            XCTAssertTrue(String(describing: error).contains("is used by both"))
         }
     }
 
-    func testRejectsReservedWindowMovementHotkeys() throws {
+    func testRejectsBoundWindowMovementHotkey() throws {
         let hotkeys = [
             "ctrl+option+left",
             "ctrl+option+right",
@@ -201,8 +201,8 @@ final class ConfigurationTests: XCTestCase {
                 """
             )
 
-            XCTAssertThrowsError(try ConfigurationLoader.load(from: url), "Expected \(hotkey) to be reserved") { error in
-                XCTAssertTrue(String(describing: error).contains("reserved"))
+            XCTAssertThrowsError(try ConfigurationLoader.load(from: url), "Expected \(hotkey) to conflict") { error in
+                XCTAssertTrue(String(describing: error).contains("is used by both"))
             }
         }
     }
@@ -327,7 +327,7 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertThrowsError(try ConfigurationLoader.load(from: url))
     }
 
-    func testEnablesCommandPaletteByDefault() throws {
+    func testUsesDefaultBindingsWithoutHotkeysBlock() throws {
         let url = try temporaryConfigURL(
             extension: "yaml",
             contents: """
@@ -339,15 +339,16 @@ final class ConfigurationTests: XCTestCase {
         )
 
         let configuration = try ConfigurationLoader.load(from: url)
-        XCTAssertTrue(configuration.settings.commandPaletteEnabled)
+        XCTAssertEqual(configuration.bindings, .default)
+        XCTAssertEqual(configuration.bindings.commandBox, DefaultHotKeys.commandBox)
     }
 
-    func testDisablesCommandPaletteFromSettings() throws {
+    func testRebindsBuiltInHotkey() throws {
         let url = try temporaryConfigURL(
             extension: "yaml",
             contents: """
-            settings:
-              command-palette: false
+            hotkeys:
+              command-box: cmd+shift+space
 
             shortcuts:
               project-a:
@@ -357,15 +358,16 @@ final class ConfigurationTests: XCTestCase {
         )
 
         let configuration = try ConfigurationLoader.load(from: url)
-        XCTAssertFalse(configuration.settings.commandPaletteEnabled)
+        XCTAssertEqual(configuration.bindings.commandBox?.normalizedValue, "cmd+shift+space")
+        XCTAssertEqual(configuration.bindings.clipboardMenu, DefaultHotKeys.clipboardMenu)
     }
 
-    func testAllowsTextCommandHotkeyWhenCommandPaletteIsDisabled() throws {
+    func testUnbindingFreesTheHotkeyForAShortcut() throws {
         let url = try temporaryConfigURL(
             extension: "yaml",
             contents: """
-            settings:
-              command-palette: false
+            hotkeys:
+              command-box: off
 
             shortcuts:
               reserved:
@@ -375,51 +377,17 @@ final class ConfigurationTests: XCTestCase {
         )
 
         let configuration = try ConfigurationLoader.load(from: url)
+        XCTAssertNil(configuration.bindings.commandBox)
         XCTAssertEqual(configuration.shortcuts.first?.hotKey.normalizedValue, "option+space")
     }
 
-    func testEnablesWindowFeaturesByDefault() throws {
+    func testDisablingAGroupUnbindsEveryKeyInIt() throws {
         let url = try temporaryConfigURL(
             extension: "yaml",
             contents: """
-            shortcuts:
-              project-a:
-                hotkey: cmd+option+1
-                bundle-id: com.microsoft.VSCode
-            """
-        )
-
-        let configuration = try ConfigurationLoader.load(from: url)
-        XCTAssertTrue(configuration.settings.windowMovementEnabled)
-        XCTAssertTrue(configuration.settings.windowSwitcherEnabled)
-    }
-
-    func testDisablesWindowFeaturesFromSettings() throws {
-        let url = try temporaryConfigURL(
-            extension: "yaml",
-            contents: """
-            settings:
-              window-movement: false
-              window-switcher: false
-
-            shortcuts:
-              project-a:
-                hotkey: cmd+option+1
-                bundle-id: com.microsoft.VSCode
-            """
-        )
-
-        let configuration = try ConfigurationLoader.load(from: url)
-        XCTAssertFalse(configuration.settings.windowMovementEnabled)
-        XCTAssertFalse(configuration.settings.windowSwitcherEnabled)
-    }
-
-    func testAllowsWindowMoveHotkeyWhenWindowMovementIsDisabled() throws {
-        let url = try temporaryConfigURL(
-            extension: "yaml",
-            contents: """
-            settings:
-              window-movement: false
+            hotkeys:
+              window-movement: off
+              window-switcher: off
 
             shortcuts:
               reserved:
@@ -429,43 +397,93 @@ final class ConfigurationTests: XCTestCase {
         )
 
         let configuration = try ConfigurationLoader.load(from: url)
+        XCTAssertFalse(configuration.bindings.windowMovementEnabled)
+        XCTAssertFalse(configuration.bindings.windowSwitcherEnabled)
         XCTAssertEqual(configuration.shortcuts.first?.hotKey.normalizedValue, "ctrl+option+left")
     }
 
-    func testAllowsSwitcherHotkeyWhenWindowSwitcherIsDisabled() throws {
+    func testRebindsOneKeyOfAGroupAndKeepsTheRest() throws {
         let url = try temporaryConfigURL(
             extension: "yaml",
             contents: """
-            settings:
-              window-switcher: false
+            hotkeys:
+              window-movement:
+                left-half: ctrl+cmd+left
+                maximize: off
 
             shortcuts:
-              reserved:
-                hotkey: cmd+tab
+              project-a:
+                hotkey: cmd+option+1
                 bundle-id: com.microsoft.VSCode
             """
         )
 
         let configuration = try ConfigurationLoader.load(from: url)
-        XCTAssertEqual(configuration.shortcuts.first?.hotKey.normalizedValue, "cmd+tab")
+        XCTAssertEqual(configuration.bindings.moveWindowLeftHalf?.normalizedValue, "cmd+ctrl+left")
+        XCTAssertNil(configuration.bindings.maximizeWindow)
+        XCTAssertEqual(configuration.bindings.moveWindowRightHalf, DefaultHotKeys.moveWindowRightHalf)
+        XCTAssertTrue(configuration.bindings.windowMovementEnabled)
     }
 
-    func testKeepsWindowMoveHotkeyReservedWhenOnlySwitcherIsDisabled() throws {
+    func testAcceptsHotkeyOnlyConfiguration() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            hotkeys:
+              window-switcher: off
+            """
+        )
+
+        let configuration = try ConfigurationLoader.load(from: url)
+        XCTAssertTrue(configuration.shortcuts.isEmpty)
+        XCTAssertFalse(configuration.bindings.windowSwitcherEnabled)
+    }
+
+    func testRejectsUnknownBindingName() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            hotkeys:
+              command-bx: cmd+j
+            """
+        )
+
+        XCTAssertThrowsError(try ConfigurationLoader.load(from: url)) { error in
+            XCTAssertTrue(String(describing: error).contains("Unknown hotkey binding"))
+        }
+    }
+
+    func testRejectsSwitcherBindingWithoutModifier() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            hotkeys:
+              window-switcher:
+                all-windows: f13
+            """
+        )
+
+        XCTAssertThrowsError(try ConfigurationLoader.load(from: url)) { error in
+            XCTAssertTrue(String(describing: error).contains("needs a modifier"))
+        }
+    }
+
+    func testRejectsMovedSettingsKeys() throws {
         let url = try temporaryConfigURL(
             extension: "yaml",
             contents: """
             settings:
-              window-switcher: false
+              command-palette: false
 
             shortcuts:
-              reserved:
-                hotkey: ctrl+option+left
+              project-a:
+                hotkey: cmd+option+1
                 bundle-id: com.microsoft.VSCode
             """
         )
 
         XCTAssertThrowsError(try ConfigurationLoader.load(from: url)) { error in
-            XCTAssertTrue(String(describing: error).contains("reserved"))
+            XCTAssertTrue(String(describing: error).contains("hotkeys.command-box"))
         }
     }
 

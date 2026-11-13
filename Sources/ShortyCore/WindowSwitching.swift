@@ -13,7 +13,6 @@ public enum WindowSwitcherEvent: Sendable {
     case advanceCurrentApplication
     case reverseActiveWindowSwitcher
     case reverseCurrentApplication
-    case moveFocusedWindow(WindowMoveCommand, String)
     case commandReleased
     case cancel
 }
@@ -577,13 +576,16 @@ public final class WindowSwitcherSessionState {
 public final class WindowSwitcherEventTap {
     public typealias Handler = (WindowSwitcherEvent) -> Void
 
-    /// When false the tap leaves the window-move combos to the focused app.
-    public var windowMovementEnabled = true
+    /// Configured switcher keys. The tap only claims what is bound.
+    public var allWindowsHotKey: KeyCombo?
+    public var currentApplicationHotKey: KeyCombo?
 
     private let handler: Handler
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var isSwitching = false
+    /// Modifiers of the key that opened the switcher; releasing them commits.
+    private var holdFlags: CGEventFlags = []
 
     public init(handler: @escaping Handler) {
         self.handler = handler
@@ -655,7 +657,7 @@ public final class WindowSwitcherEventTap {
         }
 
         if type == .flagsChanged {
-            if isSwitching && !event.flags.contains(.maskCommand) {
+            if isSwitching, !holdFlags.isEmpty, !event.flags.contains(holdFlags) {
                 isSwitching = false
                 handler(.commandReleased)
                 return nil
@@ -670,12 +672,6 @@ public final class WindowSwitcherEventTap {
 
         let keyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
         let flags = event.flags
-        let hasCommand = flags.contains(.maskCommand)
-
-        if let moveEvent = movementEvent(for: keyCode, flags: flags) {
-            handler(moveEvent)
-            return nil
-        }
 
         if isSwitching && keyCode == UInt32(kVK_Escape) {
             isSwitching = false
@@ -683,53 +679,43 @@ public final class WindowSwitcherEventTap {
             return nil
         }
 
-        guard hasCommand else {
-            return Unmanaged.passUnretained(event)
-        }
-
-        if keyCode == UInt32(kVK_Tab) {
-            isSwitching = true
-            handler(flags.contains(.maskShift) ? .reverseActiveWindowSwitcher : .advanceAllWindows)
+        if let hotKey = allWindowsHotKey, matches(hotKey, keyCode: keyCode, flags: flags) {
+            startSwitching(with: hotKey)
+            handler(reverseRequested(hotKey, flags: flags) ? .reverseActiveWindowSwitcher : .advanceAllWindows)
             return nil
         }
 
-        if keyCode == UInt32(kVK_ANSI_Grave) {
-            isSwitching = true
-            handler(flags.contains(.maskShift) ? .reverseCurrentApplication : .advanceCurrentApplication)
+        if let hotKey = currentApplicationHotKey, matches(hotKey, keyCode: keyCode, flags: flags) {
+            startSwitching(with: hotKey)
+            handler(reverseRequested(hotKey, flags: flags) ? .reverseCurrentApplication : .advanceCurrentApplication)
             return nil
         }
 
         return Unmanaged.passUnretained(event)
     }
 
-    private func movementEvent(for keyCode: UInt32, flags: CGEventFlags) -> WindowSwitcherEvent? {
-        guard windowMovementEnabled,
-              flags.contains(.maskControl),
-              flags.contains(.maskAlternate),
-              !flags.contains(.maskShift) else {
-            return nil
+    private func startSwitching(with hotKey: KeyCombo) {
+        isSwitching = true
+        holdFlags = hotKey.cgEventFlags
+    }
+
+    /// Shift reverses the cycle, unless the binding itself uses shift.
+    private func reverseRequested(_ hotKey: KeyCombo, flags: CGEventFlags) -> Bool {
+        !hotKey.cgEventFlags.contains(.maskShift) && flags.contains(.maskShift)
+    }
+
+    private func matches(_ hotKey: KeyCombo, keyCode: UInt32, flags: CGEventFlags) -> Bool {
+        guard keyCode == hotKey.keyCode else {
+            return false
         }
 
-        if flags.contains(.maskCommand) {
-            switch keyCode {
-            case UInt32(kVK_UpArrow):
-                return .moveFocusedWindow(.maximize, ReservedHotKeys.maximizeWindow.normalizedValue)
-            case UInt32(kVK_LeftArrow):
-                return .moveFocusedWindow(.moveToMonitor(.left), ReservedHotKeys.moveWindowToLeftMonitor.normalizedValue)
-            case UInt32(kVK_RightArrow):
-                return .moveFocusedWindow(.moveToMonitor(.right), ReservedHotKeys.moveWindowToRightMonitor.normalizedValue)
-            default:
-                return nil
-            }
+        let required = hotKey.cgEventFlags
+        guard flags.contains(required) else {
+            return false
         }
 
-        switch keyCode {
-        case UInt32(kVK_LeftArrow):
-            return .moveFocusedWindow(.cycleHalf(.left), ReservedHotKeys.moveWindowLeftHalf.normalizedValue)
-        case UInt32(kVK_RightArrow):
-            return .moveFocusedWindow(.cycleHalf(.right), ReservedHotKeys.moveWindowRightHalf.normalizedValue)
-        default:
-            return nil
-        }
+        // Shift is allowed on top as the reverse modifier; nothing else is.
+        let extras = flags.subtracting(required).intersection([.maskCommand, .maskAlternate, .maskControl, .maskShift])
+        return extras.isEmpty || extras == .maskShift
     }
 }

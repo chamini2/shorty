@@ -1,4 +1,5 @@
 import Carbon
+import CoreGraphics
 import Foundation
 
 public enum KeyComboError: Error, CustomStringConvertible {
@@ -25,6 +26,33 @@ public struct KeyCombo: Hashable, Sendable {
     public let keyCode: UInt32
     public let modifiers: UInt32
     public let normalizedValue: String
+
+    public var hasModifiers: Bool {
+        modifiers != 0
+    }
+
+    /// Carbon modifier mask as the event tap sees it.
+    public var cgEventFlags: CGEventFlags {
+        var flags: CGEventFlags = []
+
+        if modifiers & UInt32(cmdKey) != 0 {
+            flags.insert(.maskCommand)
+        }
+
+        if modifiers & UInt32(optionKey) != 0 {
+            flags.insert(.maskAlternate)
+        }
+
+        if modifiers & UInt32(controlKey) != 0 {
+            flags.insert(.maskControl)
+        }
+
+        if modifiers & UInt32(shiftKey) != 0 {
+            flags.insert(.maskShift)
+        }
+
+        return flags
+    }
 
     public static func parse(_ rawValue: String) throws -> KeyCombo {
         let tokens = rawValue

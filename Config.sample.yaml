@@ -1,10 +1,18 @@
-settings:
-  # Set to false to disable the option+space command box.
-  command-palette: true
-  # Set to false to disable the window move hotkeys (ctrl+option+arrows, cmd+ctrl+option+arrows).
-  window-movement: true
-  # Set to false to give cmd+tab and cmd+grave back to macOS.
-  window-switcher: true
+# Built-in keys. Leave a binding out to keep its default, or set it to `off`
+# to unbind it and free the key for an app shortcut.
+hotkeys:
+  clipboard-menu: cmd+shift+v
+  snippets-menu: cmd+shift+b
+  command-box: option+space
+  window-switcher:
+    all-windows: cmd+tab
+    current-app: cmd+grave
+  window-movement:
+    left-half: ctrl+option+left
+    right-half: ctrl+option+right
+    maximize: ctrl+option+cmd+up
+    left-monitor: ctrl+option+cmd+left
+    right-monitor: ctrl+option+cmd+right
 
 shortcuts:
   bundle-and-title-regex:

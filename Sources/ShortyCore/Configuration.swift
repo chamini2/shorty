@@ -124,11 +124,9 @@ public struct LaunchOptions {
 
 public struct ConfigurationFile: Decodable {
     public let shortcuts: [ShortcutConfiguration]
-    public let settings: SettingsConfiguration?
 
     enum CodingKeys: String, CodingKey {
         case shortcuts
-        case settings
     }
 
     public init(from decoder: Decoder) throws {
@@ -140,37 +138,6 @@ public struct ConfigurationFile: Decodable {
             .map { element in
                 element.value.withID(element.key)
             }
-        self.settings = try container.decodeIfPresent(SettingsConfiguration.self, forKey: .settings)
-    }
-}
-
-public struct SettingsConfiguration: Decodable {
-    public let commandPalette: Bool?
-    public let windowMovement: Bool?
-    public let windowSwitcher: Bool?
-
-    enum CodingKeys: String, CodingKey {
-        case commandPalette = "command-palette"
-        case windowMovement = "window-movement"
-        case windowSwitcher = "window-switcher"
-    }
-}
-
-public struct ShortySettings: Equatable, Sendable {
-    public static let `default` = ShortySettings()
-
-    public let commandPaletteEnabled: Bool
-    public let windowMovementEnabled: Bool
-    public let windowSwitcherEnabled: Bool
-
-    public init(
-        commandPaletteEnabled: Bool = true,
-        windowMovementEnabled: Bool = true,
-        windowSwitcherEnabled: Bool = true
-    ) {
-        self.commandPaletteEnabled = commandPaletteEnabled
-        self.windowMovementEnabled = windowMovementEnabled
-        self.windowSwitcherEnabled = windowSwitcherEnabled
     }
 }
 
@@ -236,7 +203,7 @@ public enum ConfigurationError: Error, CustomStringConvertible {
     case invalidWindowIndex(String, Int)
     case invalidRegex(field: String, shortcutID: String, error: Error)
     case duplicateHotkey(String)
-    case reservedHotkey(String, String)
+    case hotkeyConflict(hotkey: String, binding: String, shortcutID: String)
     case invalidSnippets(String)
 
     public var description: String {
@@ -256,8 +223,8 @@ public enum ConfigurationError: Error, CustomStringConvertible {
             return "Shortcut `\(shortcutID)` has invalid regex for `\(field)`: \(error.localizedDescription)"
         case let .duplicateHotkey(hotkey):
             return "Duplicate hotkey `\(hotkey)` in config."
-        case let .reservedHotkey(hotkey, usage):
-            return "Shortcut hotkey `\(hotkey)` is reserved for the \(usage)."
+        case let .hotkeyConflict(hotkey, binding, shortcutID):
+            return "Hotkey `\(hotkey)` is used by both the `\(binding)` binding and shortcut `\(shortcutID)`. Set `\(binding): off` to free it."
         case let .invalidSnippets(message):
             return "Invalid snippets config: \(message)"
         }
@@ -267,7 +234,7 @@ public enum ConfigurationError: Error, CustomStringConvertible {
 public struct LoadedConfiguration {
     public let shortcuts: [LoadedShortcut]
     public let snippetGroups: [SnippetGroup]
-    public let settings: ShortySettings
+    public let bindings: HotKeyBindings
 }
 
 public struct LoadedShortcut {
@@ -435,17 +402,17 @@ public enum ConfigurationLoader {
         let contents = String(decoding: data, as: UTF8.self)
         let configuration = try YAMLDecoder().decode(ConfigurationFile.self, from: contents)
         let snippetGroups = try parseSnippetGroups(from: contents)
+        let bindings = try HotKeyBindingsParser.parse(yaml: contents)
+        let customizesBindings = bindings != .default
 
-        guard !configuration.shortcuts.isEmpty || !snippetGroups.isEmpty else {
+        guard !configuration.shortcuts.isEmpty || !snippetGroups.isEmpty || customizesBindings else {
             throw ConfigurationError.emptyConfiguration
         }
 
-        let settings = ShortySettings(
-            commandPaletteEnabled: configuration.settings?.commandPalette ?? ShortySettings.default.commandPaletteEnabled,
-            windowMovementEnabled: configuration.settings?.windowMovement ?? ShortySettings.default.windowMovementEnabled,
-            windowSwitcherEnabled: configuration.settings?.windowSwitcher ?? ShortySettings.default.windowSwitcherEnabled
-        )
-        let reservedDescriptions = ReservedHotKeys.descriptionsByNormalizedValue(for: settings)
+        var bindingsByHotkey: [String: String] = [:]
+        for action in bindings.boundActions {
+            bindingsByHotkey[action.hotKey.normalizedValue] = action.name
+        }
 
         var seenHotkeys = Set<String>()
         var loadedShortcuts: [LoadedShortcut] = []
@@ -463,8 +430,12 @@ public enum ConfigurationLoader {
             }
 
             let hotKey = try KeyCombo.parse(shortcut.hotkey)
-            if let reservedUsage = reservedDescriptions[hotKey.normalizedValue] {
-                throw ConfigurationError.reservedHotkey(hotKey.normalizedValue, reservedUsage)
+            if let binding = bindingsByHotkey[hotKey.normalizedValue] {
+                throw ConfigurationError.hotkeyConflict(
+                    hotkey: hotKey.normalizedValue,
+                    binding: binding,
+                    shortcutID: shortcutID
+                )
             }
             guard seenHotkeys.insert(hotKey.normalizedValue).inserted else {
                 throw ConfigurationError.duplicateHotkey(hotKey.normalizedValue)
@@ -494,7 +465,7 @@ public enum ConfigurationLoader {
         return LoadedConfiguration(
             shortcuts: loadedShortcuts,
             snippetGroups: snippetGroups,
-            settings: settings
+            bindings: bindings
         )
     }
 
