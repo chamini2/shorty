@@ -170,12 +170,14 @@ Inside the command box, `cmd+shift+v` / `cmd+shift+b` open the clipboard / snipp
 open ./dist/Shorty.app
 ```
 
-The app reads its config from `~/config/shorty.yaml`:
+The app reads its config from `~/.shorty/config.yaml`:
 
 ```bash
-mkdir -p "$HOME/config"
-cp ./Config.sample.yaml "$HOME/config/shorty.yaml"
+mkdir -p "$HOME/.shorty"
+cp ./Config.sample.yaml "$HOME/.shorty/config.yaml"
 ```
+
+If `~/.shorty/config.yaml` is missing, Shorty falls back to the old `~/config/shorty.yaml` path. Move that file to `~/.shorty/config.yaml` when you want the hidden folder.
 
 Shorty reloads the config automatically when you save it.
 
@@ -197,7 +199,7 @@ If the project directory moved and SwiftPM has stale module-cache paths, `build.
 ### Command Line
 
 ```text
-Shorty [--config PATH]                       Run (default config: ~/config/shorty.yaml)
+Shorty [--config PATH]                       Run (default config: ~/.shorty/config.yaml)
 Shorty --validate-config [--config PATH]     Validate config and exit
 Shorty --list-windows [--verbose]            Print accessible windows and match values
 Shorty --help

@@ -33,7 +33,10 @@ public struct LaunchOptions {
     public let mode: LaunchMode
     public let windowListFormat: WindowListFormat
 
-    public init(arguments: [String]) throws {
+    public init(
+        arguments: [String],
+        fileExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
+    ) throws {
         var configPath: String?
         var mode: LaunchMode = .run
         var windowListFormat: WindowListFormat = .plain
@@ -71,7 +74,7 @@ public struct LaunchOptions {
             index += 1
         }
 
-        let resolvedPath = configPath ?? Self.defaultConfigURL.path
+        let resolvedPath = configPath ?? Self.resolvedDefaultConfigURL(fileExists: fileExists).path
         let expandedPath = (resolvedPath as NSString).expandingTildeInPath
 
         self.configURL = URL(fileURLWithPath: expandedPath)
@@ -82,8 +85,26 @@ public struct LaunchOptions {
     public static var defaultConfigURL: URL {
         FileManager.default
             .homeDirectoryForCurrentUser
+            .appendingPathComponent(".shorty")
+            .appendingPathComponent("config.yaml")
+    }
+
+    /// Pre-`~/.shorty` location, still read when the current default is absent.
+    public static var legacyDefaultConfigURL: URL {
+        FileManager.default
+            .homeDirectoryForCurrentUser
             .appendingPathComponent("config")
             .appendingPathComponent("shorty.yaml")
+    }
+
+    public static func resolvedDefaultConfigURL(
+        fileExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
+    ) -> URL {
+        if !fileExists(defaultConfigURL), fileExists(legacyDefaultConfigURL) {
+            return legacyDefaultConfigURL
+        }
+
+        return defaultConfigURL
     }
 
     public static let usage = """
