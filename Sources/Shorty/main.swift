@@ -84,6 +84,8 @@ do {
         app.run()
     }
 } catch {
-    console.error(error.localizedDescription)
+    // Config errors describe themselves; localizedDescription would hide them
+    // behind "The operation couldn't be completed."
+    console.error(String(describing: error))
     exit(1)
 }
