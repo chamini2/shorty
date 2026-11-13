@@ -203,37 +203,9 @@ public enum ClipboardPickerSearch {
     }
 
     private static func rootHistoryEntries(_ history: [ClipboardItem]) -> [ClipboardPickerEntry] {
-        let items = Array(history.prefix(ClipboardConstants.maxVisibleItems))
-        var entries = items
-            .prefix(ClipboardConstants.maxDirectMenuItems)
+        history
+            .prefix(ClipboardConstants.maxVisibleItems)
             .map { ClipboardPickerEntry.history($0) }
-
-        let overflowStart = ClipboardConstants.maxDirectMenuItems
-        guard items.count > overflowStart else {
-            return entries
-        }
-
-        let maxOverflowItems = ClipboardConstants.overflowSubmenuSize * ClipboardConstants.maxOverflowSubmenus
-        let overflowEnd = min(items.count, overflowStart + maxOverflowItems)
-        var rangeStart = overflowStart
-
-        while rangeStart < overflowEnd {
-            let rangeEnd = min(rangeStart + ClipboardConstants.overflowSubmenuSize, overflowEnd)
-            let folderEntries = items[rangeStart..<rangeEnd].map { ClipboardPickerEntry.history($0) }
-            entries.append(
-                .folder(
-                    ClipboardPickerFolder(
-                        id: "history:\(rangeStart):\(rangeEnd)",
-                        title: "\(rangeStart + 1) - \(rangeEnd)",
-                        kind: .history,
-                        entries: folderEntries
-                    )
-                )
-            )
-            rangeStart = rangeEnd
-        }
-
-        return entries
     }
 
     private static func rootSnippetEntries(_ snippetGroups: [SnippetGroup]) -> [ClipboardPickerEntry] {

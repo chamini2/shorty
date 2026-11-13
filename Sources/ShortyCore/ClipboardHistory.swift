@@ -523,12 +523,8 @@ public struct ClipboardRepresentation: Codable, Equatable, Sendable {
 public enum ClipboardConstants {
     public static let maxStoredItems = 200
     public static let maxVisibleItems = 200
-    public static let maxDirectMenuItems = 20
-    public static let overflowSubmenuSize = 20
-    public static let maxOverflowSubmenus = 9
     public static let maxMenuItemTitleLength = 60
     public static let maxPickerItemTitleLength = 240
-    public static let maxTooltipLength = 500
     public static let pollInterval: TimeInterval = 0.75
     /// Bigger images are skipped rather than written to the asset store.
     public static let maxStoredImageBytes = 10 * 1024 * 1024
