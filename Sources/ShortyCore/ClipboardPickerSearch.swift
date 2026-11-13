@@ -183,7 +183,7 @@ public enum ClipboardPickerSearch {
         switch mode {
         case .all:
             historyResults = history
-                .filter { item in matches(normalizedQuery, in: [item.plainText]) }
+                .filter { item in matches(normalizedQuery, in: item.searchableText) }
                 .map { .history($0) }
         case .snippetsOnly:
             historyResults = []
@@ -297,7 +297,7 @@ public enum ClipboardPickerSearch {
             return matches(query, in: [folder.title]) ||
                 folder.entries.contains { matches($0, query: query) }
         case let .history(item):
-            return matches(query, in: [item.plainText])
+            return matches(query, in: item.searchableText)
         case let .snippet(groupTitle, snippet):
             return matches(query, in: [groupTitle, snippet.title, snippet.content])
         }
@@ -308,7 +308,7 @@ public enum ClipboardPickerSearch {
         case .header, .folder, .back, .empty:
             return false
         case let .history(item):
-            return matches(query, in: [item.plainText])
+            return matches(query, in: item.searchableText)
         case let .snippet(_, snippet):
             return matches(query, in: [snippet.title, snippet.content])
         }

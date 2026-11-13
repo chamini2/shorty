@@ -39,6 +39,10 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
     public var updatedAt: Date
     /// Absent for older entries and for text Shorty itself put on the pasteboard.
     public var source: ClipboardSource?
+    /// Image bytes live in the asset store; this is the reference.
+    public var image: ClipboardAsset?
+    /// Files copied in Finder, kept as paths rather than copies.
+    public var files: [ClipboardFileReference]
 
     public init(
         plainText: String,
@@ -47,13 +51,17 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         additionalRepresentations: [ClipboardRepresentation] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
-        source: ClipboardSource? = nil
+        source: ClipboardSource? = nil,
+        image: ClipboardAsset? = nil,
+        files: [ClipboardFileReference] = []
     ) {
         self.id = Self.makeID(
             plainText: plainText,
             rtfData: rtfData,
             rtfdData: rtfdData,
-            additionalRepresentations: additionalRepresentations
+            additionalRepresentations: additionalRepresentations,
+            image: image,
+            files: files
         )
         self.plainText = plainText
         self.rtfData = rtfData
@@ -62,25 +70,66 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.source = source
+        self.image = image
+        self.files = files
+    }
+
+    /// Text the picker search matches against, including file paths.
+    public var searchableText: [String] {
+        var values = [plainText]
+
+        if plainText.isEmpty, image != nil {
+            values.append("image")
+        }
+
+        values.append(contentsOf: files.map(\.name))
+        values.append(contentsOf: files.map(\.path))
+
+        return values.filter { !$0.isEmpty }
+    }
+
+    /// What the list and the detail pane show. Image-only copies carry no text.
+    public var previewText: String {
+        if !plainText.isEmpty {
+            return plainText
+        }
+
+        if let image {
+            return "Image \(image.pixelSizeLabel)"
+        }
+
+        if !files.isEmpty {
+            return files.map(\.name).joined(separator: ", ")
+        }
+
+        return plainText
     }
 
     public static func read(
         from pasteboard: NSPasteboard,
         now: Date = Date(),
-        source: ClipboardSource? = nil
+        source: ClipboardSource? = nil,
+        assetStore: ClipboardAssetStore? = nil
     ) -> ClipboardItem? {
         let rtfData = firstData(from: pasteboard, types: PasteboardTypes.rtf)
         let rtfdData = firstData(from: pasteboard, types: PasteboardTypes.rtfd)
         let additionalRepresentations = additionalRepresentations(from: pasteboard)
+        let files = fileReferences(from: pasteboard)
         let plainText = firstString(from: pasteboard, types: PasteboardTypes.string)
             ?? plainText(fromRTFDData: rtfdData)
             ?? plainText(fromRTFData: rtfData)
             ?? ""
 
+        // A copied file already describes itself by path; only inline image
+        // data needs storing.
+        let image = files.isEmpty ? storedImage(from: pasteboard, assetStore: assetStore) : nil
+
         guard !plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
             rtfData != nil ||
             rtfdData != nil ||
-            !additionalRepresentations.isEmpty else {
+            !additionalRepresentations.isEmpty ||
+            image != nil ||
+            !files.isEmpty else {
             return nil
         }
 
@@ -91,7 +140,53 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
             additionalRepresentations: additionalRepresentations,
             createdAt: now,
             updatedAt: now,
-            source: source
+            source: source,
+            image: image,
+            files: files
+        )
+    }
+
+    private static func fileReferences(from pasteboard: NSPasteboard) -> [ClipboardFileReference] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+
+        guard let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL] else {
+            return []
+        }
+
+        return urls.filter(\.isFileURL).map { ClipboardFileReference(path: $0.path) }
+    }
+
+    /// Prefers the pasteboard's own PNG. Screenshot TIFF is uncompressed and
+    /// often many times larger, so it is re-encoded before storing.
+    private static func storedImage(
+        from pasteboard: NSPasteboard,
+        assetStore: ClipboardAssetStore?
+    ) -> ClipboardAsset? {
+        guard let assetStore else {
+            return nil
+        }
+
+        if let data = pasteboard.data(forType: .png),
+           let representation = NSBitmapImageRep(data: data) {
+            return assetStore.store(
+                data: data,
+                type: "public.png",
+                pixelWidth: representation.pixelsWide,
+                pixelHeight: representation.pixelsHigh
+            )
+        }
+
+        guard let tiffData = pasteboard.data(forType: .tiff),
+              let representation = NSBitmapImageRep(data: tiffData),
+              let pngData = representation.representation(using: .png, properties: [:]) else {
+            return nil
+        }
+
+        return assetStore.store(
+            data: pngData,
+            type: "public.png",
+            pixelWidth: representation.pixelsWide,
+            pixelHeight: representation.pixelsHigh
         )
     }
 
@@ -125,7 +220,7 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
     }
 
     private func linePreview() -> ClipboardLinePreview {
-        let lines = Self.lineComponents(in: plainText)
+        let lines = Self.lineComponents(in: previewText)
         let titleLineIndex = lines.firstIndex { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? 0
         let title = lines.indices.contains(titleLineIndex) ? lines[titleLineIndex] : ""
         let additionalLineCount = max(0, lines.count - titleLineIndex - 1)
@@ -246,7 +341,9 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         plainText: String,
         rtfData: Data?,
         rtfdData: Data?,
-        additionalRepresentations: [ClipboardRepresentation]
+        additionalRepresentations: [ClipboardRepresentation],
+        image: ClipboardAsset? = nil,
+        files: [ClipboardFileReference] = []
     ) -> String {
         var data = Data()
         data.appendUTF8("plainText:")
@@ -269,6 +366,16 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
             data.append(representation.data)
         }
 
+        if let image {
+            data.appendUTF8("\nimage:")
+            data.appendUTF8(image.fileName)
+        }
+
+        for file in files {
+            data.appendUTF8("\nfile:")
+            data.appendUTF8(file.path)
+        }
+
         return SHA256.hash(data: data)
             .map { String(format: "%02x", $0) }
             .joined()
@@ -282,6 +389,9 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         case additionalRepresentations
         case createdAt
         case updatedAt
+        case source
+        case image
+        case files
     }
 
     public init(from decoder: Decoder) throws {
@@ -295,11 +405,16 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         ) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        source = try container.decodeIfPresent(ClipboardSource.self, forKey: .source)
+        image = try container.decodeIfPresent(ClipboardAsset.self, forKey: .image)
+        files = try container.decodeIfPresent([ClipboardFileReference].self, forKey: .files) ?? []
         id = try container.decodeIfPresent(String.self, forKey: .id) ?? Self.makeID(
             plainText: plainText,
             rtfData: rtfData,
             rtfdData: rtfdData,
-            additionalRepresentations: additionalRepresentations
+            additionalRepresentations: additionalRepresentations,
+            image: image,
+            files: files
         )
     }
 
@@ -314,6 +429,11 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         }
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encodeIfPresent(source, forKey: .source)
+        try container.encodeIfPresent(image, forKey: .image)
+        if !files.isEmpty {
+            try container.encode(files, forKey: .files)
+        }
     }
 }
 
@@ -346,21 +466,28 @@ public enum ClipboardConstants {
     public static let maxPickerItemTitleLength = 240
     public static let maxTooltipLength = 500
     public static let pollInterval: TimeInterval = 0.75
+    /// Bigger images are skipped rather than written to the asset store.
+    public static let maxStoredImageBytes = 10 * 1024 * 1024
 }
 
 public final class ClipboardHistoryStore {
     private let url: URL
     private let maxStoredItems: Int
     private let lock = NSRecursiveLock()
+    private let assetStore: ClipboardAssetStore
     private var items: [ClipboardItem]
 
     public init(
         url: URL = ClipboardHistoryStore.defaultURL,
-        maxStoredItems: Int = ClipboardConstants.maxStoredItems
+        maxStoredItems: Int = ClipboardConstants.maxStoredItems,
+        assetStore: ClipboardAssetStore = ClipboardAssetStore()
     ) {
         self.url = url
         self.maxStoredItems = maxStoredItems
+        self.assetStore = assetStore
         self.items = Self.loadItems(from: url)
+        // A crash or a hand-edited history file can leave files behind.
+        assetStore.removeOrphans(keeping: self.items.compactMap(\.image), graceSeconds: 300)
     }
 
     public static var defaultURL: URL {
@@ -389,6 +516,7 @@ public final class ClipboardHistoryStore {
 
         if items.count > maxStoredItems {
             items.removeSubrange(maxStoredItems..<items.count)
+            assetStore.removeOrphans(keeping: items.compactMap(\.image))
         }
 
         save()
@@ -442,6 +570,7 @@ public final class ClipboardHistoryStore {
 public final class ClipboardMonitor: NSObject {
     private let pasteboard: NSPasteboard
     private let store: ClipboardHistoryStore
+    private let assetStore: ClipboardAssetStore
     private let pollInterval: TimeInterval
     private var timer: Timer?
     private var cachedChangeCount: Int
@@ -449,9 +578,11 @@ public final class ClipboardMonitor: NSObject {
     public init(
         store: ClipboardHistoryStore,
         pasteboard: NSPasteboard = .general,
-        pollInterval: TimeInterval = ClipboardConstants.pollInterval
+        pollInterval: TimeInterval = ClipboardConstants.pollInterval,
+        assetStore: ClipboardAssetStore = ClipboardAssetStore()
     ) {
         self.store = store
+        self.assetStore = assetStore
         self.pasteboard = pasteboard
         self.pollInterval = pollInterval
         self.cachedChangeCount = pasteboard.changeCount
@@ -494,7 +625,11 @@ public final class ClipboardMonitor: NSObject {
 
         cachedChangeCount = pasteboard.changeCount
 
-        guard let item = ClipboardItem.read(from: pasteboard, source: .frontmostApplication()) else {
+        guard let item = ClipboardItem.read(
+            from: pasteboard,
+            source: .frontmostApplication(),
+            assetStore: assetStore
+        ) else {
             return
         }
 
@@ -505,10 +640,16 @@ public final class ClipboardMonitor: NSObject {
 public final class ClipboardPaster {
     private let pasteboard: NSPasteboard
     private weak var monitor: ClipboardMonitor?
+    private let assetStore: ClipboardAssetStore
 
-    public init(pasteboard: NSPasteboard = .general, monitor: ClipboardMonitor? = nil) {
+    public init(
+        pasteboard: NSPasteboard = .general,
+        monitor: ClipboardMonitor? = nil,
+        assetStore: ClipboardAssetStore = ClipboardAssetStore()
+    ) {
         self.pasteboard = pasteboard
         self.monitor = monitor
+        self.assetStore = assetStore
     }
 
     public func paste(_ item: ClipboardItem) {
@@ -522,6 +663,28 @@ public final class ClipboardPaster {
     }
 
     public func copyToPasteboard(_ item: ClipboardItem) {
+        // Files go back as URLs so Finder pastes the real file, and apps that
+        // want bytes read them from the URL themselves.
+        if !item.files.isEmpty {
+            let urls = item.files.filter(\.exists).map(\.url)
+
+            if !urls.isEmpty {
+                pasteboard.clearContents()
+                pasteboard.writeObjects(urls as [NSURL])
+                monitor?.notePasteboardChangeHandled()
+                return
+            }
+        }
+
+        // Image data, not a file URL: a URL pastes as a path in text fields.
+        if let asset = item.image, let data = assetStore.data(for: asset) {
+            let type = NSPasteboard.PasteboardType(asset.type)
+            pasteboard.declareTypes([type], owner: nil)
+            pasteboard.setData(data, forType: type)
+            monitor?.notePasteboardChangeHandled()
+            return
+        }
+
         var types: [NSPasteboard.PasteboardType] = []
 
         appendUnique(

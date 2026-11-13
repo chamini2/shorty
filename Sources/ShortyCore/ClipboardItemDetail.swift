@@ -8,6 +8,7 @@ public enum ClipboardItemKind: String, Equatable, Sendable {
     case image = "Image"
     case snippet = "Snippet"
     case folder = "Folder"
+    case file = "File"
 }
 
 public struct ClipboardDetailRow: Equatable, Sendable {
@@ -25,17 +26,25 @@ public struct ClipboardItemDetail: Equatable, Sendable {
     public let kind: ClipboardItemKind
     /// Bundle ID of the app the text came from, for the row icon.
     public let sourceBundleID: String?
+    /// Set when the pane should show a picture instead of text.
+    public let image: ClipboardAsset?
+    /// Set when the pane should show copied files instead of text.
+    public let files: [ClipboardFileReference]
     public let rows: [ClipboardDetailRow]
 
     public init(
         body: String,
         kind: ClipboardItemKind,
         sourceBundleID: String? = nil,
+        image: ClipboardAsset? = nil,
+        files: [ClipboardFileReference] = [],
         rows: [ClipboardDetailRow]
     ) {
         self.body = body
         self.kind = kind
         self.sourceBundleID = sourceBundleID
+        self.image = image
+        self.files = files
         self.rows = rows
     }
 }
@@ -87,21 +96,55 @@ public enum ClipboardItemDetailBuilder {
         }
 
         rows.append(ClipboardDetailRow(label: "Type", value: kind.rawValue))
-        rows.append(contentsOf: sizeRows(for: item.plainText))
+
+        if let image = item.image {
+            rows.append(ClipboardDetailRow(label: "Dimensions", value: image.pixelSizeLabel))
+            rows.append(ClipboardDetailRow(label: "Size", value: byteLabel(image.byteSize)))
+        } else if !item.files.isEmpty {
+            rows.append(ClipboardDetailRow(label: "Files", value: "\(item.files.count)"))
+
+            if let first = item.files.first {
+                rows.append(
+                    ClipboardDetailRow(
+                        label: "Location",
+                        value: (first.path as NSString).deletingLastPathComponent
+                    )
+                )
+
+                if !first.exists {
+                    rows.append(ClipboardDetailRow(label: "State", value: "Missing"))
+                }
+            }
+        } else {
+            rows.append(contentsOf: sizeRows(for: item.plainText))
+        }
+
         rows.append(
             ClipboardDetailRow(label: "Copied", value: dateFormatter.string(from: item.updatedAt))
         )
 
         return ClipboardItemDetail(
-            body: item.plainText,
+            body: item.previewText,
             kind: kind,
             sourceBundleID: item.source?.bundleID,
+            image: item.image,
+            files: item.files,
             rows: rows
         )
     }
 
+    public static func byteLabel(_ bytes: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(bytes))
+    }
+
     public static func kind(for item: ClipboardItem) -> ClipboardItemKind {
-        if item.additionalRepresentations.contains(where: { isImageType($0.type) }) {
+        if !item.files.isEmpty {
+            return .file
+        }
+
+        if item.image != nil || item.additionalRepresentations.contains(where: { isImageType($0.type) }) {
             return .image
         }
 
