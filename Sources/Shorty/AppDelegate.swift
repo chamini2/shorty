@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let emptyShortcutsItem = NSMenuItem(title: "No shortcuts loaded", action: nil, keyEquivalent: "")
     private var dynamicShortcutItems: [NSMenuItem] = []
     private let clipboardPickerPanel = ClipboardPickerPanelController()
+    private var presentedPickerKind: ClipboardMenuKind?
     private let commandPalettePanel = CommandPalettePanelController()
     private let windowSwitcherPanel = WindowSwitcherPanelController()
 
@@ -206,6 +207,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showCommandPalette() {
+        // The same hotkey closes it again.
+        if commandPalettePanel.isPresented {
+            commandPalettePanel.hide()
+            return
+        }
+
         commandPalettePanel.show()
     }
 
@@ -214,6 +221,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // The same hotkey closes the picker; the other one switches to it.
+        if clipboardPickerPanel.isPresented {
+            clipboardPickerPanel.hide()
+
+            if presentedPickerKind == kind {
+                presentedPickerKind = nil
+                return
+            }
+        }
+
+        presentedPickerKind = kind
         showClipboardPicker(kind)
     }
 

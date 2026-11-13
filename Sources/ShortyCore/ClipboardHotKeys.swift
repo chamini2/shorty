@@ -1,6 +1,6 @@
 import Foundation
 
-public enum ClipboardMenuKind: Sendable {
+public enum ClipboardMenuKind: Equatable, Sendable {
     case combined
     case snippets
 }

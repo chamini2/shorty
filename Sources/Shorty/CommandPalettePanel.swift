@@ -42,6 +42,10 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
         configureStackView()
     }
 
+    var isPresented: Bool {
+        panel.isVisible
+    }
+
     func show() {
         searchField.stringValue = ""
         selectionRangeAfterRefocus = nil

@@ -90,6 +90,10 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         configureTable()
     }
 
+    var isPresented: Bool {
+        panel.isVisible
+    }
+
     func show(
         mode: ClipboardPickerMode,
         history: [ClipboardItem],
