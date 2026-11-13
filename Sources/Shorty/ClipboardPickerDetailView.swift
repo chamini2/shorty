@@ -22,6 +22,8 @@ final class ClipboardPickerDetailView: NSView {
 
     private let bodyScrollView = NSScrollView()
     private let bodyTextView = NSTextView()
+    private let imageView = NSImageView()
+    private let assetStore = ClipboardAssetStore()
     private let sectionTitleLabel = NSTextField(labelWithString: "Information")
     private let rowsStackView = NSStackView()
     private let placeholderLabel = NSTextField(labelWithString: "")
@@ -39,6 +41,7 @@ final class ClipboardPickerDetailView: NSView {
     func update(with detail: ClipboardItemDetail?) {
         guard let detail else {
             bodyScrollView.isHidden = true
+            imageView.isHidden = true
             sectionTitleLabel.isHidden = true
             rowsStackView.isHidden = true
             placeholderLabel.isHidden = false
@@ -46,9 +49,13 @@ final class ClipboardPickerDetailView: NSView {
         }
 
         placeholderLabel.isHidden = true
-        bodyScrollView.isHidden = detail.body.isEmpty
         sectionTitleLabel.isHidden = false
         rowsStackView.isHidden = false
+
+        let preview = previewImage(for: detail)
+        imageView.image = preview
+        imageView.isHidden = preview == nil
+        bodyScrollView.isHidden = preview != nil || detail.body.isEmpty
 
         bodyTextView.string = detail.body
         bodyTextView.scrollToBeginningOfDocument(nil)
@@ -79,6 +86,18 @@ final class ClipboardPickerDetailView: NSView {
         bodyTextView.isHorizontallyResizable = false
         bodyTextView.textContainer?.widthTracksTextView = true
 
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        // Scales big screenshots down, leaves small ones at natural size.
+        imageView.imageScaling = .scaleProportionallyDown
+        imageView.imageAlignment = .alignCenter
+        imageView.isHidden = true
+        // Without this the image's intrinsic size drives layout and a large
+        // screenshot stretches the panel.
+        for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
+            imageView.setContentCompressionResistancePriority(.defaultLow, for: axis)
+            imageView.setContentHuggingPriority(.defaultLow, for: axis)
+        }
+
         bodyScrollView.translatesAutoresizingMaskIntoConstraints = false
         bodyScrollView.documentView = bodyTextView
         bodyScrollView.drawsBackground = false
@@ -104,6 +123,7 @@ final class ClipboardPickerDetailView: NSView {
         placeholderLabel.isHidden = true
 
         addSubview(bodyScrollView)
+        addSubview(imageView)
         addSubview(sectionTitleLabel)
         addSubview(rowsStackView)
         addSubview(placeholderLabel)
@@ -126,6 +146,11 @@ final class ClipboardPickerDetailView: NSView {
             rowsStackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
             rowsStackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
             rowsStackView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Metrics.verticalPadding),
+
+            imageView.topAnchor.constraint(equalTo: bodyScrollView.topAnchor),
+            imageView.leadingAnchor.constraint(equalTo: bodyScrollView.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: bodyScrollView.trailingAnchor),
+            imageView.bottomAnchor.constraint(equalTo: bodyScrollView.bottomAnchor),
 
             placeholderLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
             placeholderLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -195,6 +220,21 @@ final class ClipboardPickerDetailView: NSView {
 
         NSLayoutConstraint.activate(constraints)
         return container
+    }
+
+    /// Images show the picture; copied files show the icon of the first file.
+    private func previewImage(for detail: ClipboardItemDetail) -> NSImage? {
+        if let asset = detail.image {
+            return assetStore.image(for: asset)
+        }
+
+        guard let file = detail.files.first, file.exists else {
+            return nil
+        }
+
+        let icon = NSWorkspace.shared.icon(forFile: file.path)
+        icon.size = NSSize(width: 128, height: 128)
+        return icon
     }
 
     private func applicationIcon(for bundleID: String?) -> NSImage? {

@@ -63,6 +63,8 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
     private var keyMonitor: Any?
     private var locallyHandledKeyEvent: HandledKeyEvent?
     private var sourceIconCache: [String: NSImage] = [:]
+    private var thumbnailCache: [String: NSImage] = [:]
+    private let assetStore = ClipboardAssetStore()
     private lazy var documentIcon = Self.icon(NSWorkspace.shared.icon(for: UTType.plainText))
     private lazy var folderIcon: NSImage = {
         if let image = NSImage(named: NSImage.folderName) {
@@ -755,12 +757,36 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         case .folder, .back:
             return folderIcon
         case let .history(item):
-            return sourceIcon(forBundleID: item.source?.bundleID) ?? documentIcon
+            return thumbnail(for: item)
+                ?? sourceIcon(forBundleID: item.source?.bundleID)
+                ?? documentIcon
         case .snippet:
             return documentIcon
         case .header, .empty:
             return nil
         }
+    }
+
+    private func thumbnail(for item: ClipboardItem) -> NSImage? {
+        if let asset = item.image {
+            if let cached = thumbnailCache[asset.fileName] {
+                return cached
+            }
+
+            guard let image = assetStore.image(for: asset) else {
+                return nil
+            }
+
+            let thumbnail = Self.icon(image)
+            thumbnailCache[asset.fileName] = thumbnail
+            return thumbnail
+        }
+
+        guard let file = item.files.first, file.exists else {
+            return nil
+        }
+
+        return Self.icon(NSWorkspace.shared.icon(forFile: file.path))
     }
 
     private func sourceIcon(forBundleID bundleID: String?) -> NSImage? {
