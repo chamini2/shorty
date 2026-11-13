@@ -142,6 +142,22 @@ snippets:
 
 Each group is a folder in the picker, each key is an item title, and the value is pasted as plain text. Order follows the config.
 
+Snippets sit above the clipboard history in the picker. The picker opens on the
+newest history entry, so snippets are one `up` away and never in the way.
+
+### Picker Keys
+
+| Key | Action |
+| --- | --- |
+| `return` | Paste the entry, keeping rich text |
+| `cmd+return` | Copy to the clipboard without pasting |
+| `option+return` | Paste as plain text |
+| `shift+return` | Paste with blank lines dropped and lines joined |
+| `cmd+v` / `cmd+c` / `cmd+x` / `cmd+a` | Edit the search field |
+
+Modifiers also work on click, and `shift` wins over `cmd`, which wins over
+`option`.
+
 ## 4. Command Box
 
 `option+space` opens a command box. Type a command and see the result live. `return` copies the result to the clipboard; `escape` closes.

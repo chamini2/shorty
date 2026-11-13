@@ -382,11 +382,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     controller.pasteClipboardItemByJoiningTrimmedNonEmptyLines(item)
                 case .plainText:
                     controller.pasteClipboardItemAsPlainText(item)
+                case .copyOnly:
+                    controller.copyClipboardItem(item)
                 case .standard:
                     controller.pasteClipboardItem(item)
                 }
             case let .snippet(_, snippet):
-                controller.pasteSnippet(snippet)
+                if activationMode == .copyOnly {
+                    controller.copySnippet(snippet)
+                } else {
+                    controller.pasteSnippet(snippet)
+                }
             }
         }
     }

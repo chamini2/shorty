@@ -10,6 +10,8 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         static let listWidth: CGFloat = 320
         static let panelHeight: CGFloat = 440
         static let dividerWidth: CGFloat = 1
+        /// How far down the viewport the opening selection sits.
+        static let selectionContextRatio: CGFloat = 0.25
         static let maxVisibleRows = 35
         static let rowHeight: CGFloat = 24
         static let headerRowHeight: CGFloat = 18
@@ -356,16 +358,13 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
            let preferredIndex = entries.firstIndex(where: { $0.id == preferredEntryID && $0.isSelectable }) {
             selectedIndex = preferredIndex
         } else if resetSelection || !entries.indices.contains(selectedIndex) || !entries[selectedIndex].isSelectable {
-            selectedIndex = firstSelectableIndex() ?? -1
+            selectedIndex = initialSelectionIndex() ?? -1
         }
 
         resizePanelForCurrentEntries()
         tableView.reloadData()
         syncTableWidth()
-        if entries.count <= Metrics.maxVisibleRows {
-            resetScrollPosition()
-        }
-        selectCurrentRow()
+        selectCurrentRow(anchorContextAbove: true)
     }
 
     private func resizePanelForCurrentEntries() {
@@ -397,11 +396,6 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         return max(1, floor(min(Metrics.listWidth, width > 0 ? width : Metrics.listWidth)))
     }
 
-    private func resetScrollPosition() {
-        scrollView.contentView.scroll(to: NSPoint(x: 0, y: 0))
-        scrollView.reflectScrolledClipView(scrollView.contentView)
-    }
-
     private func positionPanel() {
         let mouseLocation = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) }
@@ -426,6 +420,10 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
 
     private func handleKeyDown(_ event: NSEvent, consumesLocalDuplicate: Bool = true) -> Bool {
         if consumesLocalDuplicate, consumeLocallyHandledEvent(event) {
+            return true
+        }
+
+        if forwardEditCommandIfNeeded(event) {
             return true
         }
 
@@ -508,6 +506,26 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         return consumeLocallyHandledEvent(event)
     }
 
+    /// A menu bar app has no Edit menu, so AppKit never turns `cmd+v` and
+    /// friends into editing actions. Send them to the field editor directly.
+    private func forwardEditCommandIfNeeded(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+              let key = event.charactersIgnoringModifiers?.lowercased(),
+              let action = Self.editActionsByKey[key] else {
+            return false
+        }
+
+        return NSApp.sendAction(action, to: nil, from: searchField)
+    }
+
+    private static let editActionsByKey: [String: Selector] = [
+        "v": #selector(NSText.paste(_:)),
+        "c": #selector(NSText.copy(_:)),
+        "x": #selector(NSText.cut(_:)),
+        "a": #selector(NSText.selectAll(_:)),
+        "z": Selector(("undo:")),
+    ]
+
     private func consumeLocallyHandledEvent(_ event: NSEvent) -> Bool {
         guard locallyHandledKeyEvent?.matches(event) == true else {
             return false
@@ -533,6 +551,8 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
             return true
 
         default:
+            // Edit keys are forwarded from `handleKeyDown`, which the local key
+            // monitor drives. Doing it here too would paste twice.
             return false
         }
     }
@@ -540,8 +560,21 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
     fileprivate static func activationMode(event: NSEvent? = nil) -> ClipboardPickerActivationMode {
         ClipboardPickerActivationMode.fromModifiers(
             command: commandModifierIsActive(event: event),
-            shift: shiftModifierIsActive(event: event)
+            shift: shiftModifierIsActive(event: event),
+            option: optionModifierIsActive(event: event)
         )
+    }
+
+    fileprivate static func optionModifierIsActive(event: NSEvent? = nil) -> Bool {
+        if event?.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .contains(.option) == true {
+            return true
+        }
+
+        return NSEvent.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .contains(.option)
     }
 
     fileprivate static func shiftModifierIsActive(event: NSEvent? = nil) -> Bool {
@@ -705,7 +738,26 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         entries.indices.first { entries[$0].isSelectable }
     }
 
-    private func selectCurrentRow() {
+    /// Opens on the newest history item, leaving the snippets above it one
+    /// `up` away. While filtering, the first match wins whatever section it is
+    /// in, since that is what the query asked for.
+    private func initialSelectionIndex() -> Int? {
+        guard query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return firstSelectableIndex()
+        }
+
+        let historyIndex = entries.indices.first { index in
+            if case .history = entries[index] {
+                return true
+            }
+
+            return false
+        }
+
+        return historyIndex ?? firstSelectableIndex()
+    }
+
+    private func selectCurrentRow(anchorContextAbove: Bool = false) {
         updateDetail()
 
         guard entries.indices.contains(selectedIndex), entries[selectedIndex].isSelectable else {
@@ -715,11 +767,27 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
 
         tableView.selectRowIndexes(IndexSet(integer: selectedIndex), byExtendingSelection: false)
 
-        if entries.count > Metrics.maxVisibleRows {
-            tableView.scrollRowToVisible(selectedIndex)
+        if anchorContextAbove {
+            scrollKeepingContextAboveSelection()
         } else {
-            resetScrollPosition()
+            tableView.scrollRowToVisible(selectedIndex)
         }
+    }
+
+    /// Opening on the newest history item would otherwise scroll the snippets
+    /// off the top. Leave the selected row a little way down the viewport so
+    /// whatever sits above it stays in view.
+    private func scrollKeepingContextAboveSelection() {
+        let rowRect = tableView.rect(ofRow: selectedIndex)
+        let viewportHeight = scrollView.contentView.bounds.height
+        let maximumOffset = max(0, tableView.frame.height - viewportHeight)
+        let offset = min(
+            max(0, rowRect.minY - viewportHeight * Metrics.selectionContextRatio),
+            maximumOffset
+        )
+
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: offset))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     private func makeCell(for entry: ClipboardPickerEntry) -> NSView {

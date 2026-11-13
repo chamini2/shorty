@@ -22,16 +22,16 @@ final class ClipboardPickerSearchTests: XCTestCase {
             mode: .all
         )
 
-        XCTAssertEqual(entries[0], .header("History"))
-        XCTAssertEqual(entries[1...45].compactMap(\.pasteResult), history.map { .history($0) })
-        XCTAssertEqual(entries[46], .header("Snippets"))
-        XCTAssertEqual(entries[47].title, "Work")
-        XCTAssertEqual(entries[48].title, "Personal")
+        XCTAssertEqual(entries[0], .header("Snippets"))
+        XCTAssertEqual(entries[1].title, "Work")
+        XCTAssertEqual(entries[2].title, "Personal")
+        XCTAssertEqual(entries[3], .header("History"))
+        XCTAssertEqual(entries[4...48].compactMap(\.pasteResult), history.map { .history($0) })
 
         // Only snippet groups are folders now; history is one scrollable list.
-        XCTAssertTrue(entries[1...45].allSatisfy { $0.folder == nil })
+        XCTAssertTrue(entries[4...48].allSatisfy { $0.folder == nil })
 
-        guard case let .folder(workFolder) = entries[47] else {
+        guard case let .folder(workFolder) = entries[1] else {
             return XCTFail("Expected snippet folder")
         }
 

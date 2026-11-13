@@ -149,6 +149,18 @@ public final class ShortyController {
         clipboardPaster.pasteText(text)
     }
 
+    public func copyClipboardItem(_ item: ClipboardItem) {
+        console.info("Copying clipboard history item without pasting.")
+        clipboardHistoryStore.add(item)
+        clipboardPaster.copyToPasteboard(item)
+    }
+
+    public func copySnippet(_ snippet: Snippet) {
+        console.info("Copying snippet without pasting.")
+        clipboardHistoryStore.addPlainText(snippet.content)
+        clipboardPaster.copyTextToPasteboard(snippet.content)
+    }
+
     public func pasteSnippet(_ snippet: Snippet) {
         clipboardHistoryStore.addPlainText(snippet.content)
         clipboardPaster.pasteText(snippet.content)

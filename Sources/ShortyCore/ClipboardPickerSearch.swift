@@ -134,6 +134,18 @@ public enum ClipboardPickerSearch {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         var entries: [ClipboardPickerEntry] = []
 
+        // Snippets sit above history: the picker opens on the newest history
+        // item, which puts snippets one `up` away.
+        let snippetEntries = rootEntriesMatching(
+            rootSnippetEntries(snippetGroups),
+            query: normalizedQuery
+        )
+
+        if !snippetEntries.isEmpty || normalizedQuery.isEmpty {
+            entries.append(.header("Snippets"))
+            entries.append(contentsOf: snippetEntries.isEmpty ? [.empty("No snippets configured")] : snippetEntries)
+        }
+
         if mode == .all {
             let historyEntries = rootEntriesMatching(
                 rootHistoryEntries(history),
@@ -144,16 +156,6 @@ public enum ClipboardPickerSearch {
                 entries.append(.header("History"))
                 entries.append(contentsOf: historyEntries.isEmpty ? [.empty("No clipboard history")] : historyEntries)
             }
-        }
-
-        let snippetEntries = rootEntriesMatching(
-            rootSnippetEntries(snippetGroups),
-            query: normalizedQuery
-        )
-
-        if !snippetEntries.isEmpty || normalizedQuery.isEmpty {
-            entries.append(.header("Snippets"))
-            entries.append(contentsOf: snippetEntries.isEmpty ? [.empty("No snippets configured")] : snippetEntries)
         }
 
         return entries.isEmpty ? [.empty("No matches")] : entries
