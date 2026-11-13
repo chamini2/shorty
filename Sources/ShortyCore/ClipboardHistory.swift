@@ -17,6 +17,17 @@ public struct ClipboardSource: Codable, Equatable, Sendable {
         workspace: NSWorkspace = .shared,
         ownPID: pid_t = ProcessInfo.processInfo.processIdentifier
     ) -> ClipboardSource? {
+        // An overlay panel, such as iTerm2's hotkey window, takes keyboard
+        // focus without activating its app, so `frontmostApplication` still
+        // names whatever sits behind it. The front window knows better.
+        if let pid = frontWindowOwnerPID(excluding: ownPID),
+           let application = NSRunningApplication(processIdentifier: pid) {
+            return ClipboardSource(
+                bundleID: application.bundleIdentifier,
+                name: application.localizedName
+            )
+        }
+
         guard let application = workspace.frontmostApplication,
               application.processIdentifier != ownPID else {
             return nil
@@ -27,6 +38,59 @@ public struct ClipboardSource: Codable, Equatable, Sendable {
             name: application.localizedName
         )
     }
+
+    /// Owner of the frontmost ordinary window. Skips always-on-top HUDs by
+    /// capping the window layer, and menu bar extras by requiring real size.
+    static func frontWindowOwnerPID(excluding ownPID: pid_t) -> pid_t? {
+        guard let windows = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else {
+            return nil
+        }
+
+        return attributableOwnerPID(from: windows, excluding: ownPID)
+    }
+
+    /// Split from the window query so the filtering can be tested without a
+    /// window server.
+    static func attributableOwnerPID(from windows: [[String: Any]], excluding ownPID: pid_t) -> pid_t? {
+        for window in windows {
+            guard let ownerPID = (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+                  ownerPID != ownPID,
+                  let layer = (window[kCGWindowLayer as String] as? NSNumber)?.intValue,
+                  layer >= 0,
+                  layer <= Self.maxAttributableWindowLayer,
+                  (window[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1 > 0,
+                  let bounds = window[kCGWindowBounds as String],
+                  let frame = CGRect(dictionaryRepresentation: bounds as! CFDictionary),
+                  frame.width >= Self.minAttributableWindowSize.width,
+                  frame.height >= Self.minAttributableWindowSize.height else {
+                continue
+            }
+
+            let ownerName = window[kCGWindowOwnerName as String] as? String ?? ""
+            guard !Self.systemWindowOwners.contains(ownerName) else {
+                continue
+            }
+
+            return ownerPID
+        }
+
+        return nil
+    }
+
+    /// Normal windows are layer 0; iTerm2's hotkey window sits at 25. HUD
+    /// overlays live far above that and never own a copy.
+    private static let maxAttributableWindowLayer = 25
+    private static let minAttributableWindowSize = CGSize(width: 200, height: 100)
+    private static let systemWindowOwners: Set<String> = [
+        "Window Server",
+        "Control Center",
+        "Notification Center",
+        "Dock",
+        "Spotlight",
+    ]
 }
 
 public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
