@@ -217,6 +217,31 @@ After code changes, run `./build-app.sh` again, quit Shorty from the menu bar, a
 
 On first launch macOS should prompt for Accessibility access. The menu bar `Open Accessibility Settings` item links to the pane. If Shorty is not listed, add it manually in `System Settings > Privacy & Security > Accessibility` (add `dist/Shorty.app` for the app, or the raw binary when running from `.build`).
 
+### Signing
+
+`build-app.sh` signs the app ad-hoc by default. An ad-hoc signature changes with
+every build, so macOS treats each reinstall as a different app and drops its
+Accessibility approval. Creating one local signing identity keeps the signature
+stable and the approval with it.
+
+Make the identity once, in Keychain Access:
+
+1. `Keychain Access > Certificate Assistant > Create a Certificate…`
+2. Name `Shorty Local Signing`, Identity Type `Self Signed Root`, Certificate
+   Type `Code Signing`, then create it.
+
+`build-app.sh` picks it up automatically on the next build. Use another name by
+setting `SHORTY_SIGN_IDENTITY`. With no identity present the build still works,
+signs ad-hoc, and warns that the permission will reset.
+
+A self-signed certificate is normally untrusted, so `security find-identity -p
+codesigning` lists nothing even when signing works. The build therefore tries
+the identity and falls back only if `codesign` refuses it.
+
+Approve Accessibility once more after the first signed build: the signature
+changes from ad-hoc to the new identity, which macOS sees as a new app. From
+then on the approval survives reinstalls.
+
 ### Development Build
 
 ```bash

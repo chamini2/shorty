@@ -30,8 +30,22 @@ mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 cp "${SHORTY_BIN}" "${MACOS_DIR}/Shorty"
 cp "${SCRIPT_DIR}/Packaging/Shorty-Info.plist" "${CONTENTS_DIR}/Info.plist"
 
+# A stable signing identity keeps the app's designated requirement the same
+# across rebuilds, so macOS does not drop Accessibility approval on reinstall.
+# Ad-hoc signing changes identity every build, which resets the permission.
+SIGN_IDENTITY="${SHORTY_SIGN_IDENTITY:-Shorty Local Signing}"
+
 if command -v codesign >/dev/null 2>&1; then
-  codesign --force --sign - "${APP_DIR}" >/dev/null 2>&1 || true
+  # A self-signed identity is usually untrusted, so `find-identity -p
+  # codesigning` does not list it even though codesign signs with it happily.
+  # Try the identity, and fall back only if that fails.
+  if codesign --force --sign "${SIGN_IDENTITY}" "${APP_DIR}" 2>/dev/null; then
+    echo "Signed with identity: ${SIGN_IDENTITY}"
+  else
+    codesign --force --sign - "${APP_DIR}" >/dev/null 2>&1 || true
+    echo "Signed ad-hoc: identity '${SIGN_IDENTITY}' not found." >&2
+    echo "Accessibility approval will reset on each reinstall. See README > Signing." >&2
+  fi
 fi
 
 echo "Built ${APP_DIR}"
