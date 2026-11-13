@@ -8,6 +8,20 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertEqual(combo.normalizedValue, "cmd+option+1")
     }
 
+    func testParsesNumpadKeys() throws {
+        XCTAssertEqual(try KeyCombo.parse("cmd+option+numpad1").normalizedValue, "cmd+option+numpad1")
+        XCTAssertEqual(try KeyCombo.parse("cmd+keypad1").normalizedValue, "cmd+numpad1")
+        XCTAssertEqual(try KeyCombo.parse("ctrl+numpadenter").normalizedValue, "ctrl+numpadenter")
+    }
+
+    func testNumpadAndTopRowDigitsAreDifferentKeys() throws {
+        let numpad = try KeyCombo.parse("cmd+option+numpad1")
+        let topRow = try KeyCombo.parse("cmd+option+1")
+
+        XCTAssertNotEqual(numpad.keyCode, topRow.keyCode)
+        XCTAssertEqual(numpad.modifiers, topRow.modifiers)
+    }
+
     func testLoadsValidYAMLDictionaryConfiguration() throws {
         let url = try temporaryConfigURL(
             extension: "yaml",
@@ -485,6 +499,95 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertThrowsError(try ConfigurationLoader.load(from: url)) { error in
             XCTAssertTrue(String(describing: error).contains("hotkeys.command-box"))
         }
+    }
+
+    func testDigitShortcutAlsoClaimsItsKeypadTwin() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            shortcuts:
+              slack:
+                hotkey: cmd+option+1
+                bundle-id: com.tinyspeck.slackmacgap
+            """
+        )
+
+        let configuration = try ConfigurationLoader.load(from: url)
+        XCTAssertEqual(
+            configuration.shortcuts.first?.aliasHotKeys.map(\.normalizedValue),
+            ["cmd+option+numpad1"]
+        )
+    }
+
+    func testExplicitKeypadBindingWinsOverTheAlias() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            shortcuts:
+              slack:
+                hotkey: cmd+option+1
+                bundle-id: com.tinyspeck.slackmacgap
+              finder:
+                hotkey: cmd+option+numpad1
+                bundle-id: com.apple.finder
+            """
+        )
+
+        let configuration = try ConfigurationLoader.load(from: url)
+        let slack = configuration.shortcuts.first { $0.id == "slack" }
+        let finder = configuration.shortcuts.first { $0.id == "finder" }
+
+        XCTAssertEqual(slack?.aliasHotKeys, [])
+        XCTAssertEqual(finder?.hotKey.normalizedValue, "cmd+option+numpad1")
+    }
+
+    func testBuiltInBindingBlocksAShortcutAlias() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            hotkeys:
+              command-box: cmd+option+numpad1
+
+            shortcuts:
+              slack:
+                hotkey: cmd+option+1
+                bundle-id: com.tinyspeck.slackmacgap
+            """
+        )
+
+        let configuration = try ConfigurationLoader.load(from: url)
+        XCTAssertEqual(configuration.shortcuts.first?.aliasHotKeys, [])
+    }
+
+    func testNonDigitHotkeysHaveNoAlias() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            shortcuts:
+              slack:
+                hotkey: cmd+option+j
+                bundle-id: com.tinyspeck.slackmacgap
+            """
+        )
+
+        let configuration = try ConfigurationLoader.load(from: url)
+        XCTAssertEqual(configuration.shortcuts.first?.aliasHotKeys, [])
+    }
+
+    func testKeypadHotkeyDoesNotAliasBackToTheTopRow() {
+        let resolver = NumpadAliasResolver(claimedHotKeys: [])
+        let keypad = try! KeyCombo.parse("cmd+option+numpad1")
+
+        XCTAssertNil(resolver.alias(for: keypad))
+    }
+
+    func testAliasKeepsModifiers() {
+        let resolver = NumpadAliasResolver(claimedHotKeys: [])
+        let combo = try! KeyCombo.parse("cmd+ctrl+shift+7")
+        let alias = resolver.alias(for: combo)
+
+        XCTAssertEqual(alias?.normalizedValue, "cmd+ctrl+shift+numpad7")
+        XCTAssertEqual(alias?.modifiers, combo.modifiers)
     }
 
     private func temporaryConfigURL(extension fileExtension: String, contents: String) throws -> URL {

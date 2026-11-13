@@ -16,6 +16,7 @@ public final class ShortyController {
     public private(set) var loadedShortcuts: [LoadedShortcut] = []
     public private(set) var loadedSnippetGroups: [SnippetGroup] = []
     public private(set) var loadedBindings: HotKeyBindings = .default
+    private var numpadAliases = NumpadAliasResolver(claimedHotKeys: [])
 
     private let console: Console
     private let hotKeyCenter: HotKeyCenter
@@ -92,6 +93,7 @@ public final class ShortyController {
 
             let previousBindings = loadedBindings
             loadedBindings = configuration.bindings
+            numpadAliases = configuration.numpadAliases
             if didCompleteStart, loadedBindings != previousBindings {
                 applyBindings(changedFrom: previousBindings)
             }
@@ -161,6 +163,10 @@ public final class ShortyController {
             }
 
             actions.append(HotKeyAction(hotKey: hotKey, handler: handler))
+
+            if let alias = numpadAliases.alias(for: hotKey) {
+                actions.append(HotKeyAction(hotKey: alias, isOptional: true, handler: handler))
+            }
         }
 
         append(loadedBindings.clipboardMenu) { [weak self] in
@@ -198,7 +204,7 @@ public final class ShortyController {
 
         do {
             try hotKeyCenter.replaceActions(with: actions)
-            console.info("Registered built-in hotkeys: \(Self.bindingSummary(for: loadedBindings)).")
+            console.info("Registered built-in hotkeys: \(builtInHotKeySummary()).")
         } catch {
             let message = "Built-in hotkey registration failed: \(error)"
             console.error(message)
@@ -401,14 +407,20 @@ public final class ShortyController {
         permissionRequestHandler?(pane)
     }
 
-    private static func bindingSummary(for bindings: HotKeyBindings) -> String {
-        let bound = bindings.boundActions
+    private func builtInHotKeySummary() -> String {
+        let bound = loadedBindings.boundActions
         guard !bound.isEmpty else {
             return "none"
         }
 
         return bound
-            .map { "\($0.hotKey.normalizedValue) (\($0.name))" }
+            .map { action in
+                guard let alias = numpadAliases.alias(for: action.hotKey) else {
+                    return "\(action.hotKey.normalizedValue) (\(action.name))"
+                }
+
+                return "\(action.hotKey.normalizedValue) or \(alias.normalizedValue) (\(action.name))"
+            }
             .joined(separator: ", ")
     }
 }

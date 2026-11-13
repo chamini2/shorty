@@ -235,12 +235,23 @@ public struct LoadedConfiguration {
     public let shortcuts: [LoadedShortcut]
     public let snippetGroups: [SnippetGroup]
     public let bindings: HotKeyBindings
+    /// Shared by shortcuts and built-in bindings, so both see the same claims.
+    public let numpadAliases: NumpadAliasResolver
 }
 
 public struct LoadedShortcut {
     public let id: String
     public let hotKey: KeyCombo
     public let matcher: WindowMatcher
+    /// Extra combos that trigger the same shortcut, such as the keypad twin.
+    public let aliasHotKeys: [KeyCombo]
+
+    public init(id: String, hotKey: KeyCombo, matcher: WindowMatcher, aliasHotKeys: [KeyCombo] = []) {
+        self.id = id
+        self.hotKey = hotKey
+        self.matcher = matcher
+        self.aliasHotKeys = aliasHotKeys
+    }
 }
 
 public struct WindowMatcher {
@@ -462,10 +473,29 @@ public enum ConfigurationLoader {
             )
         }
 
+        let claimedHotKeys = bindings.boundActions.map(\.hotKey) + loadedShortcuts.map(\.hotKey)
+        let numpadAliases = NumpadAliasResolver(claimedHotKeys: claimedHotKeys)
+        var takenAliases = Set<String>()
+
+        loadedShortcuts = loadedShortcuts.map { shortcut in
+            guard let alias = numpadAliases.alias(for: shortcut.hotKey),
+                  takenAliases.insert(alias.normalizedValue).inserted else {
+                return shortcut
+            }
+
+            return LoadedShortcut(
+                id: shortcut.id,
+                hotKey: shortcut.hotKey,
+                matcher: shortcut.matcher,
+                aliasHotKeys: [alias]
+            )
+        }
+
         return LoadedConfiguration(
             shortcuts: loadedShortcuts,
             snippetGroups: snippetGroups,
-            bindings: bindings
+            bindings: bindings,
+            numpadAliases: numpadAliases
         )
     }
 
