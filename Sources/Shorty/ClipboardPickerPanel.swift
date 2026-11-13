@@ -6,7 +6,10 @@ import UniformTypeIdentifiers
 @MainActor
 final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     private enum Metrics {
-        static let panelWidth: CGFloat = 520
+        static let panelWidth: CGFloat = 820
+        static let listWidth: CGFloat = 320
+        static let panelHeight: CGFloat = 440
+        static let dividerWidth: CGFloat = 1
         static let maxVisibleRows = 35
         static let rowHeight: CGFloat = 24
         static let headerRowHeight: CGFloat = 18
@@ -46,6 +49,8 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
     private let searchField = ClipboardPickerSearchField(frame: .zero)
     private let tableView = ClipboardPickerTableView()
     private let scrollView = ClipboardPickerScrollView()
+    private let detailView = ClipboardPickerDetailView()
+    private let detailDateFormatter = ClipboardItemDetailBuilder.defaultDateFormatter()
     private var mode: ClipboardPickerMode = .all
     private var history: [ClipboardItem] = []
     private var snippetGroups: [SnippetGroup] = []
@@ -57,6 +62,7 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
     private var onCancel: (() -> Void)?
     private var keyMonitor: Any?
     private var locallyHandledKeyEvent: HandledKeyEvent?
+    private var sourceIconCache: [String: NSImage] = [:]
     private lazy var documentIcon = Self.icon(NSWorkspace.shared.icon(for: UTType.plainText))
     private lazy var folderIcon: NSImage = {
         if let image = NSImage(named: NSImage.folderName) {
@@ -68,7 +74,7 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
 
     override init() {
         panel = ClipboardPickerPanelWindow(
-            contentRect: NSRect(x: 0, y: 0, width: Metrics.panelWidth, height: 120),
+            contentRect: NSRect(x: 0, y: 0, width: Metrics.panelWidth, height: Metrics.panelHeight),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -156,6 +162,7 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         let selectedRow = tableView.selectedRow
         if entries.indices.contains(selectedRow), entries[selectedRow].isSelectable {
             selectedIndex = selectedRow
+            updateDetail()
         }
     }
 
@@ -180,10 +187,14 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         container.layer?.masksToBounds = true
         panel.contentView = container
 
-        searchField.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(scrollView)
-        container.addSubview(searchField)
+        let divider = NSView()
+        divider.wantsLayer = true
+        divider.layer?.backgroundColor = NSColor(calibratedWhite: 1, alpha: 0.08).cgColor
+
+        for view in [searchField, scrollView, divider, detailView] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(view)
+        }
 
         NSLayoutConstraint.activate([
             searchField.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.topPadding),
@@ -193,8 +204,18 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
 
             scrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: Metrics.searchBottomSpacing),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            scrollView.widthAnchor.constraint(equalToConstant: Metrics.listWidth),
             scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Metrics.bottomPadding),
+
+            divider.leadingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+            divider.widthAnchor.constraint(equalToConstant: Metrics.dividerWidth),
+            divider.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            divider.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+
+            detailView.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
+            detailView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            detailView.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            detailView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
     }
 
@@ -232,9 +253,9 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         }
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("entry"))
-        column.width = Metrics.panelWidth
+        column.width = Metrics.listWidth
         column.minWidth = 0
-        column.maxWidth = Metrics.panelWidth
+        column.maxWidth = Metrics.listWidth
         column.resizingMask = []
         tableView.addTableColumn(column)
 
@@ -346,24 +367,13 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
     }
 
     private func resizePanelForCurrentEntries() {
-        let visibleRows = max(1, min(max(entries.count, 1), Metrics.maxVisibleRows))
-        let overflows = entries.count > visibleRows
-        let extraHeight = overflows ? 0 : Metrics.nonOverflowSlack
-        let tableViewportHeight = entries
-            .prefix(visibleRows)
-            .reduce(CGFloat(0)) { $0 + height(for: $1) } + extraHeight
         let documentContentHeight = entries.reduce(CGFloat(0)) { $0 + height(for: $1) }
-        let documentHeight = max(documentContentHeight + extraHeight, Metrics.rowHeight)
-        let panelHeight =
-            Metrics.topPadding +
-            Metrics.searchHeight +
-            Metrics.searchBottomSpacing +
-            tableViewportHeight +
-            Metrics.bottomPadding
+        let documentHeight = max(documentContentHeight + Metrics.nonOverflowSlack, Metrics.rowHeight)
 
-        scrollView.hasVerticalScroller = overflows
-        panel.setContentSize(NSSize(width: Metrics.panelWidth, height: panelHeight))
+        panel.setContentSize(NSSize(width: Metrics.panelWidth, height: Metrics.panelHeight))
         panel.contentView?.layoutSubtreeIfNeeded()
+
+        scrollView.hasVerticalScroller = documentHeight > scrollView.contentSize.height
         tableView.setFrameOrigin(NSPoint(x: 0, y: tableView.frame.origin.y))
         tableView.setFrameSize(NSSize(width: visibleTableWidth(), height: documentHeight))
         syncTableWidth()
@@ -382,7 +392,7 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
 
     private func visibleTableWidth() -> CGFloat {
         let width = scrollView.contentSize.width
-        return max(1, floor(min(Metrics.panelWidth, width > 0 ? width : Metrics.panelWidth)))
+        return max(1, floor(min(Metrics.listWidth, width > 0 ? width : Metrics.listWidth)))
     }
 
     private func resetScrollPosition() {
@@ -606,6 +616,21 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
 
         selectedIndex = row
         tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        updateDetail()
+    }
+
+    private func updateDetail() {
+        guard entries.indices.contains(selectedIndex) else {
+            detailView.update(with: nil)
+            return
+        }
+
+        detailView.update(
+            with: ClipboardItemDetailBuilder.detail(
+                for: entries[selectedIndex],
+                dateFormatter: detailDateFormatter
+            )
+        )
     }
 
     private func activateSelected(activationMode: ClipboardPickerActivationMode) {
@@ -679,6 +704,8 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
     }
 
     private func selectCurrentRow() {
+        updateDetail()
+
         guard entries.indices.contains(selectedIndex), entries[selectedIndex].isSelectable else {
             tableView.deselectAll(nil)
             return
@@ -727,11 +754,31 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         switch entry {
         case .folder, .back:
             return folderIcon
-        case .history, .snippet:
+        case let .history(item):
+            return sourceIcon(forBundleID: item.source?.bundleID) ?? documentIcon
+        case .snippet:
             return documentIcon
         case .header, .empty:
             return nil
         }
+    }
+
+    private func sourceIcon(forBundleID bundleID: String?) -> NSImage? {
+        guard let bundleID else {
+            return nil
+        }
+
+        if let cached = sourceIconCache[bundleID] {
+            return cached
+        }
+
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            return nil
+        }
+
+        let icon = Self.icon(NSWorkspace.shared.icon(forFile: url.path))
+        sourceIconCache[bundleID] = icon
+        return icon
     }
 
     private func textColor(for entry: ClipboardPickerEntry) -> NSColor {

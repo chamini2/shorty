@@ -3,6 +3,32 @@ import Carbon
 import CryptoKit
 import Foundation
 
+/// The app that owned the pasteboard when the copy happened.
+public struct ClipboardSource: Codable, Equatable, Sendable {
+    public let bundleID: String?
+    public let name: String?
+
+    public init(bundleID: String?, name: String?) {
+        self.bundleID = bundleID
+        self.name = name
+    }
+
+    public static func frontmostApplication(
+        workspace: NSWorkspace = .shared,
+        ownPID: pid_t = ProcessInfo.processInfo.processIdentifier
+    ) -> ClipboardSource? {
+        guard let application = workspace.frontmostApplication,
+              application.processIdentifier != ownPID else {
+            return nil
+        }
+
+        return ClipboardSource(
+            bundleID: application.bundleIdentifier,
+            name: application.localizedName
+        )
+    }
+}
+
 public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public var plainText: String
@@ -11,6 +37,8 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
     public var additionalRepresentations: [ClipboardRepresentation]
     public var createdAt: Date
     public var updatedAt: Date
+    /// Absent for older entries and for text Shorty itself put on the pasteboard.
+    public var source: ClipboardSource?
 
     public init(
         plainText: String,
@@ -18,7 +46,8 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         rtfdData: Data? = nil,
         additionalRepresentations: [ClipboardRepresentation] = [],
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        source: ClipboardSource? = nil
     ) {
         self.id = Self.makeID(
             plainText: plainText,
@@ -32,9 +61,14 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         self.additionalRepresentations = additionalRepresentations
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.source = source
     }
 
-    public static func read(from pasteboard: NSPasteboard, now: Date = Date()) -> ClipboardItem? {
+    public static func read(
+        from pasteboard: NSPasteboard,
+        now: Date = Date(),
+        source: ClipboardSource? = nil
+    ) -> ClipboardItem? {
         let rtfData = firstData(from: pasteboard, types: PasteboardTypes.rtf)
         let rtfdData = firstData(from: pasteboard, types: PasteboardTypes.rtfd)
         let additionalRepresentations = additionalRepresentations(from: pasteboard)
@@ -56,7 +90,8 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
             rtfdData: rtfdData,
             additionalRepresentations: additionalRepresentations,
             createdAt: now,
-            updatedAt: now
+            updatedAt: now,
+            source: source
         )
     }
 
@@ -345,6 +380,7 @@ public final class ClipboardHistoryStore {
         var savedItem = item
         if let existingIndex = items.firstIndex(where: { $0.id == item.id }) {
             savedItem.createdAt = items[existingIndex].createdAt
+            savedItem.source = savedItem.source ?? items[existingIndex].source
             items.remove(at: existingIndex)
         }
 
@@ -458,7 +494,7 @@ public final class ClipboardMonitor: NSObject {
 
         cachedChangeCount = pasteboard.changeCount
 
-        guard let item = ClipboardItem.read(from: pasteboard) else {
+        guard let item = ClipboardItem.read(from: pasteboard, source: .frontmostApplication()) else {
             return
         }
 
