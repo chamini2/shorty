@@ -99,32 +99,47 @@ final class CommandTransformerTests: XCTestCase {
         XCTAssertEqual(results[0].resultText, "1223")
     }
 
-    func testEpochSecondsFormatsUTCAndSanFranciscoOnSeparateLinesWithRelativeAge() {
+    func testEpochFormatsUTCAndTheLocalZoneWithRelativeAge() {
         let now = Date(timeIntervalSince1970: 90_061)
-        let results = CommandTransformerEngine.evaluate("0000000000", now: now)
+        let result = CommandTransformerEngine.formatUTCAndLocal(
+            Date(timeIntervalSince1970: 0),
+            now: now,
+            localTimeZone: TimeZone(identifier: "Europe/Madrid")!
+        )
 
-        let result = results.first { $0.transformerName == "Epoch Seconds" }?.resultText
         XCTAssertEqual(
             result,
             """
             UTC: 1970-01-01 00:00:00 GMT (1d 1h 1m 1s ago)
-            San Francisco: 1969-12-31 16:00:00 PST (1d 1h 1m 1s ago)
+            Local: 1970-01-01 01:00:00 GMT+1 (1d 1h 1m 1s ago)
             """
         )
     }
 
-    func testEpochMillisecondsFormatsUTCAndSanFranciscoOnSeparateLinesWithRelativeAge() {
+    func testEpochSkipsTheLocalLineOnAUTCMachine() {
         let now = Date(timeIntervalSince1970: 90_061)
-        let results = CommandTransformerEngine.evaluate("00000000000000", now: now)
-
-        let result = results.first { $0.transformerName == "Epoch Milliseconds" }?.resultText
-        XCTAssertEqual(
-            result,
-            """
-            UTC: 1970-01-01 00:00:00 GMT (1d 1h 1m 1s ago)
-            San Francisco: 1969-12-31 16:00:00 PST (1d 1h 1m 1s ago)
-            """
+        let result = CommandTransformerEngine.formatUTCAndLocal(
+            Date(timeIntervalSince1970: 0),
+            now: now,
+            localTimeZone: TimeZone(secondsFromGMT: 0)!
         )
+
+        XCTAssertEqual(result, "UTC: 1970-01-01 00:00:00 GMT (1d 1h 1m 1s ago)")
+    }
+
+    func testEpochSecondsAndMillisecondsBothReportUTC() {
+        let now = Date(timeIntervalSince1970: 90_061)
+        let seconds = CommandTransformerEngine.evaluate("0000000000", now: now)
+            .first { $0.transformerName == "Epoch Seconds" }?.resultText
+        let milliseconds = CommandTransformerEngine.evaluate("00000000000000", now: now)
+            .first { $0.transformerName == "Epoch Milliseconds" }?.resultText
+
+        for result in [seconds, milliseconds] {
+            XCTAssertEqual(
+                result?.split(separator: "\n").first.map(String.init),
+                "UTC: 1970-01-01 00:00:00 GMT (1d 1h 1m 1s ago)"
+            )
+        }
     }
 
     func testByteConversionOutputsEveryOtherUnit() {

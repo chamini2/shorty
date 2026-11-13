@@ -72,7 +72,7 @@ public enum CommandTransformerEngine {
                 return "Invalid epoch seconds"
             }
 
-            return formatUTCAndSanFrancisco(Date(timeIntervalSince1970: seconds), now: now)
+            return formatUTCAndLocal(Date(timeIntervalSince1970: seconds), now: now)
         },
 
         CommandTransformer(
@@ -83,7 +83,7 @@ public enum CommandTransformerEngine {
                 return "Invalid epoch milliseconds"
             }
 
-            return formatUTCAndSanFrancisco(Date(timeIntervalSince1970: milliseconds / 1_000), now: now)
+            return formatUTCAndLocal(Date(timeIntervalSince1970: milliseconds / 1_000), now: now)
         },
 
         CommandTransformer(
@@ -348,13 +348,25 @@ public enum CommandTransformerEngine {
         }
     }
 
-    private static func formatUTCAndSanFrancisco(_ date: Date, now: Date) -> String {
+    static func formatUTCAndLocal(
+        _ date: Date,
+        now: Date,
+        localTimeZone: TimeZone = .current
+    ) -> String {
         let utc = TimeZone(secondsFromGMT: 0)!
-        let sanFrancisco = TimeZone(identifier: "America/Los_Angeles")!
         let relative = relativeDescription(from: date, to: now)
+        let utcLine = "UTC: \(format(date, in: utc)) (\(relative))"
+
+        // Nothing to add when the machine already runs on UTC.
+        guard localTimeZone.secondsFromGMT(for: date) != 0 else {
+            return utcLine
+        }
+
+        // The formatted time already carries the offset, so a long zone name
+        // would only repeat it.
         return """
-        UTC: \(format(date, in: utc)) (\(relative))
-        San Francisco: \(format(date, in: sanFrancisco)) (\(relative))
+        \(utcLine)
+        Local: \(format(date, in: localTimeZone)) (\(relative))
         """
     }
 
