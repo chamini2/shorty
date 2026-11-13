@@ -17,6 +17,42 @@ public enum ReservedHotKeys {
     public static let moveWindowToLeftMonitor = try! KeyCombo.parse("ctrl+option+cmd+left")
     public static let moveWindowToRightMonitor = try! KeyCombo.parse("ctrl+option+cmd+right")
 
+    public static let windowMovement = [
+        moveWindowLeftHalf,
+        moveWindowRightHalf,
+        maximizeWindow,
+        moveWindowToLeftMonitor,
+        moveWindowToRightMonitor,
+    ]
+
+    public static let windowSwitching = [
+        windowSwitcher,
+        currentAppWindowSwitcher,
+    ]
+
+    /// Hotkeys Shorty claims under `settings`. Disabled features free their combos for app shortcuts.
+    public static func descriptionsByNormalizedValue(for settings: ShortySettings) -> [String: String] {
+        var descriptions = descriptionsByNormalizedValue
+
+        if !settings.commandPaletteEnabled {
+            descriptions.removeValue(forKey: textCommand.normalizedValue)
+        }
+
+        if !settings.windowMovementEnabled {
+            for hotKey in windowMovement {
+                descriptions.removeValue(forKey: hotKey.normalizedValue)
+            }
+        }
+
+        if !settings.windowSwitcherEnabled {
+            for hotKey in windowSwitching {
+                descriptions.removeValue(forKey: hotKey.normalizedValue)
+            }
+        }
+
+        return descriptions
+    }
+
     public static let descriptionsByNormalizedValue: [String: String] = [
         clipboardMenu.normalizedValue: "clipboard menu",
         snippetsMenu.normalizedValue: "snippets menu",

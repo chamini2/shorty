@@ -124,9 +124,11 @@ public struct LaunchOptions {
 
 public struct ConfigurationFile: Decodable {
     public let shortcuts: [ShortcutConfiguration]
+    public let settings: SettingsConfiguration?
 
     enum CodingKeys: String, CodingKey {
         case shortcuts
+        case settings
     }
 
     public init(from decoder: Decoder) throws {
@@ -138,6 +140,37 @@ public struct ConfigurationFile: Decodable {
             .map { element in
                 element.value.withID(element.key)
             }
+        self.settings = try container.decodeIfPresent(SettingsConfiguration.self, forKey: .settings)
+    }
+}
+
+public struct SettingsConfiguration: Decodable {
+    public let commandPalette: Bool?
+    public let windowMovement: Bool?
+    public let windowSwitcher: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case commandPalette = "command-palette"
+        case windowMovement = "window-movement"
+        case windowSwitcher = "window-switcher"
+    }
+}
+
+public struct ShortySettings: Equatable, Sendable {
+    public static let `default` = ShortySettings()
+
+    public let commandPaletteEnabled: Bool
+    public let windowMovementEnabled: Bool
+    public let windowSwitcherEnabled: Bool
+
+    public init(
+        commandPaletteEnabled: Bool = true,
+        windowMovementEnabled: Bool = true,
+        windowSwitcherEnabled: Bool = true
+    ) {
+        self.commandPaletteEnabled = commandPaletteEnabled
+        self.windowMovementEnabled = windowMovementEnabled
+        self.windowSwitcherEnabled = windowSwitcherEnabled
     }
 }
 
@@ -234,6 +267,7 @@ public enum ConfigurationError: Error, CustomStringConvertible {
 public struct LoadedConfiguration {
     public let shortcuts: [LoadedShortcut]
     public let snippetGroups: [SnippetGroup]
+    public let settings: ShortySettings
 }
 
 public struct LoadedShortcut {
@@ -406,6 +440,13 @@ public enum ConfigurationLoader {
             throw ConfigurationError.emptyConfiguration
         }
 
+        let settings = ShortySettings(
+            commandPaletteEnabled: configuration.settings?.commandPalette ?? ShortySettings.default.commandPaletteEnabled,
+            windowMovementEnabled: configuration.settings?.windowMovement ?? ShortySettings.default.windowMovementEnabled,
+            windowSwitcherEnabled: configuration.settings?.windowSwitcher ?? ShortySettings.default.windowSwitcherEnabled
+        )
+        let reservedDescriptions = ReservedHotKeys.descriptionsByNormalizedValue(for: settings)
+
         var seenHotkeys = Set<String>()
         var loadedShortcuts: [LoadedShortcut] = []
 
@@ -422,7 +463,7 @@ public enum ConfigurationLoader {
             }
 
             let hotKey = try KeyCombo.parse(shortcut.hotkey)
-            if let reservedUsage = ReservedHotKeys.descriptionsByNormalizedValue[hotKey.normalizedValue] {
+            if let reservedUsage = reservedDescriptions[hotKey.normalizedValue] {
                 throw ConfigurationError.reservedHotkey(hotKey.normalizedValue, reservedUsage)
             }
             guard seenHotkeys.insert(hotKey.normalizedValue).inserted else {
@@ -450,7 +491,11 @@ public enum ConfigurationLoader {
             )
         }
 
-        return LoadedConfiguration(shortcuts: loadedShortcuts, snippetGroups: snippetGroups)
+        return LoadedConfiguration(
+            shortcuts: loadedShortcuts,
+            snippetGroups: snippetGroups,
+            settings: settings
+        )
     }
 
     private static func parseSnippetGroups(from contents: String) throws -> [SnippetGroup] {

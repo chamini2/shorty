@@ -577,6 +577,9 @@ public final class WindowSwitcherSessionState {
 public final class WindowSwitcherEventTap {
     public typealias Handler = (WindowSwitcherEvent) -> Void
 
+    /// When false the tap leaves the window-move combos to the focused app.
+    public var windowMovementEnabled = true
+
     private let handler: Handler
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -700,7 +703,8 @@ public final class WindowSwitcherEventTap {
     }
 
     private func movementEvent(for keyCode: UInt32, flags: CGEventFlags) -> WindowSwitcherEvent? {
-        guard flags.contains(.maskControl),
+        guard windowMovementEnabled,
+              flags.contains(.maskControl),
               flags.contains(.maskAlternate),
               !flags.contains(.maskShift) else {
             return nil

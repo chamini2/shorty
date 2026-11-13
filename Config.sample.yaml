@@ -1,3 +1,11 @@
+settings:
+  # Set to false to disable the option+space command box.
+  command-palette: true
+  # Set to false to disable the window move hotkeys (ctrl+option+arrows, cmd+ctrl+option+arrows).
+  window-movement: true
+  # Set to false to give cmd+tab and cmd+grave back to macOS.
+  window-switcher: true
+
 shortcuts:
   bundle-and-title-regex:
     hotkey: cmd+option+1

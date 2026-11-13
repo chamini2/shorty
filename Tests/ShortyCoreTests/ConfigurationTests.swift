@@ -327,6 +327,148 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertThrowsError(try ConfigurationLoader.load(from: url))
     }
 
+    func testEnablesCommandPaletteByDefault() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            shortcuts:
+              project-a:
+                hotkey: cmd+option+1
+                bundle-id: com.microsoft.VSCode
+            """
+        )
+
+        let configuration = try ConfigurationLoader.load(from: url)
+        XCTAssertTrue(configuration.settings.commandPaletteEnabled)
+    }
+
+    func testDisablesCommandPaletteFromSettings() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            settings:
+              command-palette: false
+
+            shortcuts:
+              project-a:
+                hotkey: cmd+option+1
+                bundle-id: com.microsoft.VSCode
+            """
+        )
+
+        let configuration = try ConfigurationLoader.load(from: url)
+        XCTAssertFalse(configuration.settings.commandPaletteEnabled)
+    }
+
+    func testAllowsTextCommandHotkeyWhenCommandPaletteIsDisabled() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            settings:
+              command-palette: false
+
+            shortcuts:
+              reserved:
+                hotkey: option+space
+                bundle-id: com.microsoft.VSCode
+            """
+        )
+
+        let configuration = try ConfigurationLoader.load(from: url)
+        XCTAssertEqual(configuration.shortcuts.first?.hotKey.normalizedValue, "option+space")
+    }
+
+    func testEnablesWindowFeaturesByDefault() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            shortcuts:
+              project-a:
+                hotkey: cmd+option+1
+                bundle-id: com.microsoft.VSCode
+            """
+        )
+
+        let configuration = try ConfigurationLoader.load(from: url)
+        XCTAssertTrue(configuration.settings.windowMovementEnabled)
+        XCTAssertTrue(configuration.settings.windowSwitcherEnabled)
+    }
+
+    func testDisablesWindowFeaturesFromSettings() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            settings:
+              window-movement: false
+              window-switcher: false
+
+            shortcuts:
+              project-a:
+                hotkey: cmd+option+1
+                bundle-id: com.microsoft.VSCode
+            """
+        )
+
+        let configuration = try ConfigurationLoader.load(from: url)
+        XCTAssertFalse(configuration.settings.windowMovementEnabled)
+        XCTAssertFalse(configuration.settings.windowSwitcherEnabled)
+    }
+
+    func testAllowsWindowMoveHotkeyWhenWindowMovementIsDisabled() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            settings:
+              window-movement: false
+
+            shortcuts:
+              reserved:
+                hotkey: ctrl+option+left
+                bundle-id: com.microsoft.VSCode
+            """
+        )
+
+        let configuration = try ConfigurationLoader.load(from: url)
+        XCTAssertEqual(configuration.shortcuts.first?.hotKey.normalizedValue, "ctrl+option+left")
+    }
+
+    func testAllowsSwitcherHotkeyWhenWindowSwitcherIsDisabled() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            settings:
+              window-switcher: false
+
+            shortcuts:
+              reserved:
+                hotkey: cmd+tab
+                bundle-id: com.microsoft.VSCode
+            """
+        )
+
+        let configuration = try ConfigurationLoader.load(from: url)
+        XCTAssertEqual(configuration.shortcuts.first?.hotKey.normalizedValue, "cmd+tab")
+    }
+
+    func testKeepsWindowMoveHotkeyReservedWhenOnlySwitcherIsDisabled() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            settings:
+              window-switcher: false
+
+            shortcuts:
+              reserved:
+                hotkey: ctrl+option+left
+                bundle-id: com.microsoft.VSCode
+            """
+        )
+
+        XCTAssertThrowsError(try ConfigurationLoader.load(from: url)) { error in
+            XCTAssertTrue(String(describing: error).contains("reserved"))
+        }
+    }
+
     private func temporaryConfigURL(extension fileExtension: String, contents: String) throws -> URL {
         let fileManager = FileManager.default
         let directory = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

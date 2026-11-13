@@ -9,7 +9,7 @@
 | 3 | [Clipboard manager + snippets](#3-clipboard-manager--snippets): searchable clipboard history and YAML snippets | `cmd+shift+v`, `cmd+shift+b` |
 | 4 | [Command box](#4-command-box): epoch timestamps, byte units, time zones | `option+space` |
 
-All built-in hotkeys are reserved and cannot be reused by app shortcuts.
+All built-in hotkeys are reserved and cannot be reused by app shortcuts. The command box, window movement, and window switcher can each be turned off in [Settings](#settings).
 
 ## 1. Global App Shortcuts
 
@@ -154,6 +154,27 @@ Each group is a folder in the picker, each key is an item title, and the value i
 | `utc time`, `et time`, `cet time`, `turkey time`, `dubai time`, `korea time`, `japan time` | Current time in that zone |
 
 Inside the command box, `cmd+shift+v` / `cmd+shift+b` open the clipboard / snippets picker and insert the chosen text at the cursor.
+
+To turn the command box off, set `command-palette: false` under `settings`. Shorty then leaves `option+space` to other apps, and an app shortcut may use it.
+
+## Settings
+
+Optional top-level `settings` section:
+
+```yaml
+settings:
+  command-palette: false
+  window-movement: false
+  window-switcher: false
+```
+
+- `command-palette`: Set to `false` to disable the `option+space` command box.
+- `window-movement`: Set to `false` to disable the window move hotkeys (`ctrl+option+left/right`, `ctrl+option+cmd+up/left/right`).
+- `window-switcher`: Set to `false` to give `cmd+tab` and `cmd+tilde/backquote` back to macOS.
+
+Every setting defaults to `true`. A disabled feature frees its hotkeys, so an app shortcut may then use them. Set `window-movement` and `window-switcher` to `false` to turn off window management completely.
+
+Settings apply on config reload, so no restart is needed.
 
 ## Setup
 
