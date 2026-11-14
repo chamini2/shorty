@@ -47,8 +47,10 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         }
     }
 
-    private let panel: ClipboardPickerPanelWindow
-    private let searchField = ClipboardPickerSearchField(frame: .zero)
+    private let box: ShortyBoxController
+    private let contentView = NSView()
+    private let header = ShortyBoxHeaderView()
+    private var searchField: ShortyBoxSearchField { header.searchField }
     private let tableView = ClipboardPickerTableView()
     private let scrollView = ClipboardPickerScrollView()
     private let detailView = ClipboardPickerDetailView()
@@ -62,6 +64,7 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
     private var selectedIndex = -1
     private var onSelect: ((ClipboardPickerResult, ClipboardPickerActivationMode) -> Void)?
     private var onCancel: (() -> Void)?
+    private var onReturn: (() -> Void)?
     private var keyMonitor: Any?
     private var locallyHandledKeyEvent: HandledKeyEvent?
     private var sourceIconCache: [String: NSImage] = [:]
@@ -76,22 +79,17 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         return Self.icon(NSWorkspace.shared.icon(for: UTType.folder))
     }()
 
-    override init() {
-        panel = ClipboardPickerPanelWindow(
-            contentRect: NSRect(x: 0, y: 0, width: Metrics.panelWidth, height: Metrics.panelHeight),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
+    init(box: ShortyBoxController) {
+        self.box = box
         super.init()
 
-        configurePanel()
+        configureContent()
         configureSearchField()
         configureTable()
     }
 
     var isPresented: Bool {
-        panel.isVisible
+        box.isPresenting(self)
     }
 
     func show(
@@ -99,7 +97,10 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         history: [ClipboardItem],
         snippetGroups: [SnippetGroup],
         onSelect: @escaping (ClipboardPickerResult, ClipboardPickerActivationMode) -> Void,
-        onCancel: @escaping () -> Void
+        onCancel: @escaping () -> Void,
+        /// Set when something else opened the picker and wants the box back on
+        /// escape, instead of the box closing.
+        onReturn: (() -> Void)? = nil
     ) {
         self.mode = mode
         self.history = history
@@ -107,31 +108,35 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         self.currentFolder = nil
         self.query = ""
         self.onSelect = onSelect
+        self.onReturn = onReturn
         self.onCancel = onCancel
         searchField.stringValue = ""
-        searchField.placeholderString = mode == .snippetsOnly ? "Search snippets" : "Search"
+        updateHeader()
 
         startKeyMonitor()
         applyFilter(resetSelection: true)
-        positionPanel()
 
-        NSApp.activate(ignoringOtherApps: true)
-        panel.orderFrontRegardless()
-        panel.makeKeyAndOrderFront(nil)
-        panel.makeFirstResponder(searchField)
+        box.present(
+            contentView,
+            owner: self,
+            keyHandler: { [weak self] event in
+                self?.handlePanelKeyEvent(event) ?? false
+            },
+            onResignKey: { [weak self] in
+                self?.hide()
+            },
+            focus: { [searchField] window in
+                window.makeFirstResponder(searchField)
+            }
+        )
     }
 
     func hide() {
+        onReturn = nil
         stopKeyMonitor()
-        panel.orderOut(nil)
+        box.dismiss(owner: self)
         onSelect = nil
         onCancel = nil
-    }
-
-    func windowDidResignKey(_ notification: Notification) {
-        if panel.isVisible {
-            hide()
-        }
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -174,43 +179,24 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         }
     }
 
-    private func configurePanel() {
-        panel.isReleasedWhenClosed = false
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-        panel.hidesOnDeactivate = false
-        panel.appearance = NSAppearance(named: .darkAqua)
-        panel.delegate = self
-        panel.keyEventHandler = { [weak self] event in
-            self?.handlePanelKeyEvent(event) ?? false
-        }
-
-        let container = NSView()
-        container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor(calibratedWhite: 0.12, alpha: 1).cgColor
-        container.layer?.cornerRadius = 8
-        container.layer?.masksToBounds = true
-        panel.contentView = container
+    private func configureContent() {
+        let container = contentView
 
         let divider = NSView()
         divider.wantsLayer = true
         divider.layer?.backgroundColor = NSColor(calibratedWhite: 1, alpha: 0.08).cgColor
 
-        for view in [searchField, scrollView, divider, detailView] as [NSView] {
+        for view in [header, scrollView, divider, detailView] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(view)
         }
 
         NSLayoutConstraint.activate([
-            searchField.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.topPadding),
-            searchField.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.searchHorizontalPadding),
-            searchField.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Metrics.searchHorizontalPadding),
-            searchField.heightAnchor.constraint(equalToConstant: Metrics.searchHeight),
+            header.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.topPadding),
+            header.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: container.trailingAnchor),
 
-            scrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: Metrics.searchBottomSpacing),
+            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Metrics.searchBottomSpacing),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.widthAnchor.constraint(equalToConstant: Metrics.listWidth),
             scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Metrics.bottomPadding),
@@ -228,12 +214,25 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
     }
 
     private func configureSearchField() {
-        searchField.placeholderString = "Search"
         searchField.delegate = self
-        searchField.focusRingType = .none
         searchField.keyHandler = { [weak self] event in
             self?.handleKeyDown(event) ?? false
         }
+        updateHeader()
+    }
+
+    /// Names the section on screen, down to the snippet folder you opened.
+    private func updateHeader() {
+        if let currentFolder {
+            header.update(title: currentFolder.title, symbolName: "folder")
+            return
+        }
+
+        let title = mode == .snippetsOnly ? "Snippets" : "Clipboard History"
+        header.update(
+            title: title,
+            symbolName: mode == .snippetsOnly ? "text.quote" : "doc.on.clipboard"
+        )
     }
 
     private func configureTable() {
@@ -375,8 +374,7 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         let documentContentHeight = entries.reduce(CGFloat(0)) { $0 + height(for: $1) }
         let documentHeight = max(documentContentHeight + Metrics.nonOverflowSlack, Metrics.rowHeight)
 
-        panel.setContentSize(NSSize(width: Metrics.panelWidth, height: Metrics.panelHeight))
-        panel.contentView?.layoutSubtreeIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
 
         scrollView.hasVerticalScroller = documentHeight > scrollView.contentSize.height
         tableView.setFrameOrigin(NSPoint(x: 0, y: tableView.frame.origin.y))
@@ -400,27 +398,6 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         return max(1, floor(min(Metrics.listWidth, width > 0 ? width : Metrics.listWidth)))
     }
 
-    private func positionPanel() {
-        let mouseLocation = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) }
-            ?? NSScreen.main
-            ?? NSScreen.screens.first
-
-        guard let screen else {
-            return
-        }
-
-        let visibleFrame = screen.visibleFrame
-        let frame = panel.frame
-        let topY = visibleFrame.maxY - visibleFrame.height * Metrics.topOffsetRatio
-
-        panel.setFrameOrigin(
-            NSPoint(
-                x: visibleFrame.midX - frame.width / 2,
-                y: max(visibleFrame.minY + Metrics.bottomMargin, topY - frame.height)
-            )
-        )
-    }
 
     private func handleKeyDown(_ event: NSEvent, consumesLocalDuplicate: Bool = true) -> Bool {
         if consumesLocalDuplicate, consumeLocallyHandledEvent(event) {
@@ -488,8 +465,8 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
             return nil
         }
 
-        guard panel.isVisible,
-              event.window === panel || NSApp.keyWindow === panel
+        guard isPresented,
+              event.window === box.window || NSApp.keyWindow === box.window
         else {
             return event
         }
@@ -688,6 +665,7 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         currentFolder = folder
         query = ""
         searchField.stringValue = ""
+        updateHeader()
         applyFilter(resetSelection: true)
         return true
     }
@@ -728,11 +706,23 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         currentFolder = nil
         query = ""
         searchField.stringValue = ""
+        updateHeader()
         applyFilter(resetSelection: true, preferredEntryID: parentEntryID)
         return true
     }
 
     private func cancel() {
+        // Hand the box straight back: dismissing first would order the window
+        // out and in again.
+        if let onReturn {
+            stopKeyMonitor()
+            onSelect = nil
+            onCancel = nil
+            self.onReturn = nil
+            onReturn()
+            return
+        }
+
         let handler = onCancel
         hide()
         handler?()
@@ -1096,40 +1086,6 @@ private final class ClipboardPickerCellView: NSTableCellView {
         }
 
         return (String(title.prefix(low)) + "...") as NSString
-    }
-}
-
-@MainActor
-private final class ClipboardPickerPanelWindow: NSPanel {
-    var keyEventHandler: ((NSEvent) -> Bool)?
-
-    override var canBecomeKey: Bool {
-        true
-    }
-
-    override var canBecomeMain: Bool {
-        true
-    }
-
-    override func sendEvent(_ event: NSEvent) {
-        if keyEventHandler?(event) == true {
-            return
-        }
-
-        super.sendEvent(event)
-    }
-}
-
-@MainActor
-private final class ClipboardPickerSearchField: NSSearchField {
-    var keyHandler: ((NSEvent) -> Bool)?
-
-    override func keyDown(with event: NSEvent) {
-        if keyHandler?(event) == true {
-            return
-        }
-
-        super.keyDown(with: event)
     }
 }
 

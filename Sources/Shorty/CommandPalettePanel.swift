@@ -19,8 +19,10 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
         static let bottomMargin: CGFloat = 20
     }
 
-    private let panel: CommandPalettePanelWindow
-    private let searchField = CommandPaletteTextField(frame: .zero)
+    private let box: ShortyBoxController
+    private let contentView = NSView()
+    private let header = ShortyBoxHeaderView()
+    private var searchField: ShortyBoxSearchField { header.searchField }
     private let stackView = NSStackView()
     private let scrollView = NSScrollView()
     private let listContainer = CommandPaletteListContainerView()
@@ -35,54 +37,61 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
     var pickerRequestHandler: ((ClipboardMenuKind) -> Void)?
     var actionHandler: ((CommandAction) -> Void)?
     var settings: CommandBoxSettings = .default
+    /// Only the entry count is shown; the picker does the browsing.
     var history: [ClipboardItem] = []
-    var snippetGroups: [SnippetGroup] = []
 
-    override init() {
-        panel = CommandPalettePanelWindow(
-            contentRect: NSRect(x: 0, y: 0, width: Metrics.panelWidth, height: 120),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
+    init(box: ShortyBoxController) {
+        self.box = box
         super.init()
 
-        configurePanel()
+        configureContent()
         configureSearchField()
         configureStackView()
     }
 
     var isPresented: Bool {
-        panel.isVisible
+        box.isPresenting(self)
     }
 
     func show() {
         searchField.stringValue = ""
         selectionRangeAfterRefocus = nil
         groupStack = []
+        updateHeader()
         updateResults()
         resizePanel()
-        positionPanel()
 
-        NSApp.activate(ignoringOtherApps: true)
-        panel.orderFrontRegardless()
-        panel.makeKeyAndOrderFront(nil)
-        panel.makeFirstResponder(searchField)
+        presentInBox()
+    }
+
+    /// Takes the box back, keeping whatever was typed and wherever you were.
+    func reshow() {
+        presentInBox()
+    }
+
+    private func presentInBox() {
+        box.present(
+            contentView,
+            owner: self,
+            keyHandler: { [weak self] event in
+                self?.handlePanelKeyEvent(event) ?? false
+            },
+            onResignKey: { [weak self] in
+                guard let self, !isPresentingNestedPicker else {
+                    return
+                }
+
+                hide()
+            },
+            focus: { [searchField] window in
+                window.makeFirstResponder(searchField)
+            }
+        )
     }
 
     func hide() {
         isPresentingNestedPicker = false
-        panel.orderOut(nil)
-    }
-
-    func windowDidResignKey(_ notification: Notification) {
-        guard !isPresentingNestedPicker else {
-            return
-        }
-
-        if panel.isVisible {
-            hide()
-        }
+        box.dismiss(owner: self)
     }
 
     func insertTextFromPicker(_ text: String) {
@@ -101,7 +110,7 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
             return true
         }
 
-        guard panel.isVisible else {
+        guard isPresented else {
             return false
         }
 
@@ -143,28 +152,10 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
         }
     }
 
-    private func configurePanel() {
-        panel.isReleasedWhenClosed = false
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-        panel.hidesOnDeactivate = false
-        panel.appearance = NSAppearance(named: .darkAqua)
-        panel.delegate = self
-        panel.keyEventHandler = { [weak self] event in
-            self?.handlePanelKeyEvent(event) ?? false
-        }
+    private func configureContent() {
+        let container = contentView
 
-        let container = NSView()
-        container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor(calibratedWhite: 0.12, alpha: 1).cgColor
-        container.layer?.cornerRadius = 8
-        container.layer?.masksToBounds = true
-        panel.contentView = container
-
-        searchField.translatesAutoresizingMaskIntoConstraints = false
+        header.translatesAutoresizingMaskIntoConstraints = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         stackView.translatesAutoresizingMaskIntoConstraints = false
         listContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -178,16 +169,15 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
         scrollView.borderType = .noBorder
         listContainer.addSubview(stackView)
 
-        container.addSubview(searchField)
+        container.addSubview(header)
         container.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
-            searchField.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.topPadding),
-            searchField.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.horizontalPadding),
-            searchField.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Metrics.horizontalPadding),
-            searchField.heightAnchor.constraint(equalToConstant: Metrics.searchHeight),
+            header.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.topPadding),
+            header.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: container.trailingAnchor),
 
-            scrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: Metrics.resultTopSpacing),
+            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Metrics.resultTopSpacing),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.horizontalPadding),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Metrics.horizontalPadding),
             scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Metrics.resultBottomPadding),
@@ -202,18 +192,32 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
     }
 
     private func configureSearchField() {
-        searchField.placeholderString = "Command"
         searchField.delegate = self
-        searchField.font = NSFont.systemFont(ofSize: Metrics.searchFontSize)
-        searchField.cell?.font = searchField.font
-        searchField.textColor = .labelColor
-        searchField.backgroundColor = NSColor(calibratedWhite: 0.14, alpha: 1)
-        searchField.drawsBackground = true
-        searchField.isBezeled = true
-        searchField.bezelStyle = .roundedBezel
-        searchField.focusRingType = .none
         searchField.keyHandler = { [weak self] event in
             self?.handleKeyDown(event) ?? false
+        }
+        updateHeader()
+    }
+
+    /// The header names what is on screen: Command at the root, or the group
+    /// you stepped into, such as Time.
+    private func updateHeader() {
+        guard let group = groupStack.last else {
+            header.update(title: "Command", symbolName: "command")
+            return
+        }
+
+        header.update(title: group.title, symbolName: Self.symbolName(for: group))
+    }
+
+    private static func symbolName(for group: CommandEntry) -> String {
+        switch group.id {
+        case "time":
+            return "clock"
+        case "clipboard.history":
+            return "doc.on.clipboard"
+        default:
+            return "square.grid.2x2"
         }
     }
 
@@ -233,8 +237,7 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
             entries = CommandCatalog.rootEntries(
                 query: query,
                 settings: settings,
-                history: history,
-                snippetGroups: snippetGroups
+                history: history
             )
         }
 
@@ -248,7 +251,6 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
 
         renderRows()
         resizePanel()
-        positionPanel()
     }
 
     private func renderRows() {
@@ -276,7 +278,7 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
         let count = entries.count
         selectedIndex = ((selectedIndex + offset) % count + count) % count
         renderRows()
-        panel.contentView?.layoutSubtreeIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
         scrollSelectionIntoView()
     }
 
@@ -299,13 +301,24 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
             return
         }
 
-        hide()
-        actionHandler?(action)
+        switch action {
+        case .openClipboard:
+            // The picker takes over the same box. Hiding first would order the
+            // window out and straight back in, which reads as a blink.
+            isPresentingNestedPicker = true
+            actionHandler?(action)
+            isPresentingNestedPicker = false
+
+        case .copyText, .moveWindow:
+            hide()
+            actionHandler?(action)
+        }
     }
 
     private func enterGroup(_ group: CommandEntry) {
         groupStack.append(group)
         searchField.stringValue = ""
+        updateHeader()
         updateResults()
     }
 
@@ -317,13 +330,13 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
 
         groupStack.removeLast()
         searchField.stringValue = ""
+        updateHeader()
         updateResults()
         return true
     }
 
     private func resizePanel() {
-        panel.setContentSize(NSSize(width: Metrics.panelWidth, height: Metrics.panelHeight))
-        panel.contentView?.layoutSubtreeIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
     }
 
     /// Keeps the selected row on screen once the list is taller than the panel.
@@ -348,27 +361,6 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
         scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
-    private func positionPanel() {
-        let mouseLocation = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) }
-            ?? NSScreen.main
-            ?? NSScreen.screens.first
-
-        guard let screen else {
-            return
-        }
-
-        let visibleFrame = screen.visibleFrame
-        let frame = panel.frame
-        let topY = visibleFrame.maxY - visibleFrame.height * Metrics.topOffsetRatio
-
-        panel.setFrameOrigin(
-            NSPoint(
-                x: visibleFrame.midX - frame.width / 2,
-                y: max(visibleFrame.minY + Metrics.bottomMargin, topY - frame.height)
-            )
-        )
-    }
 
 
 
@@ -472,7 +464,6 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
 
         pendingInsertionRange = selectedRange()
         isPresentingNestedPicker = true
-        panel.orderOut(nil)
         pickerRequestHandler(kind)
     }
 
@@ -515,11 +506,7 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
     private func refocusAfterNestedPicker() {
         isPresentingNestedPicker = false
         resizePanel()
-        positionPanel()
-        NSApp.activate(ignoringOtherApps: true)
-        panel.orderFrontRegardless()
-        panel.makeKeyAndOrderFront(nil)
-        panel.makeFirstResponder(searchField)
+        presentInBox()
         if let selectionRangeAfterRefocus {
             setSelectedRange(selectionRangeAfterRefocus)
             self.selectionRangeAfterRefocus = nil
@@ -637,40 +624,6 @@ private final class CommandPaletteEntryRowView: NSView {
 
     private static let titleFont = NSFont.systemFont(ofSize: Metrics.titleFontSize, weight: .regular)
     private static let detailFont = NSFont.monospacedSystemFont(ofSize: Metrics.detailFontSize, weight: .regular)
-}
-
-@MainActor
-private final class CommandPalettePanelWindow: NSPanel {
-    var keyEventHandler: ((NSEvent) -> Bool)?
-
-    override var canBecomeKey: Bool {
-        true
-    }
-
-    override var canBecomeMain: Bool {
-        true
-    }
-
-    override func sendEvent(_ event: NSEvent) {
-        if keyEventHandler?(event) == true {
-            return
-        }
-
-        super.sendEvent(event)
-    }
-}
-
-@MainActor
-private final class CommandPaletteTextField: NSTextField {
-    var keyHandler: ((NSEvent) -> Bool)?
-
-    override func keyDown(with event: NSEvent) {
-        if keyHandler?(event) == true {
-            return
-        }
-
-        super.keyDown(with: event)
-    }
 }
 
 

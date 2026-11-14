@@ -15,10 +15,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let shortcutsHeaderItem = NSMenuItem(title: "Shortcuts", action: nil, keyEquivalent: "")
     private let emptyShortcutsItem = NSMenuItem(title: "No shortcuts loaded", action: nil, keyEquivalent: "")
     private var dynamicShortcutItems: [NSMenuItem] = []
-    private let clipboardPickerPanel = ClipboardPickerPanelController()
+    private let box = ShortyBoxController()
+    private lazy var clipboardPickerPanel = ClipboardPickerPanelController(box: box)
     private var presentedPickerKind: ClipboardMenuKind?
     private var commandPaletteTargetApplication: NSRunningApplication?
-    private let commandPalettePanel = CommandPalettePanelController()
+    private lazy var commandPalettePanel = CommandPalettePanelController(box: box)
     private let windowSwitcherPanel = WindowSwitcherPanelController()
 
     init(controller: ShortyController) {
@@ -227,13 +228,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let .moveWindow(command):
             controller.performWindowMove(command)
 
-        case let .paste(result):
-            pastePickerResult(
-                result,
-                activationMode: .standard,
-                targetApplication: commandPaletteTargetApplication
+        case let .openClipboard(kind):
+            // Opens where the command box was, so it reads as the same window
+            // changing content rather than one closing and another appearing.
+            presentedPickerKind = kind
+            showClipboardPicker(
+                kind,
+                targetApplication: commandPaletteTargetApplication,
+                onReturn: { [weak self] in
+                    self?.commandPalettePanel.reshow()
+                }
             )
-            commandPaletteTargetApplication = nil
         }
     }
 
@@ -247,7 +252,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Captured before the box takes focus, so a paste lands where it was.
         commandPaletteTargetApplication = Self.currentPasteTargetApplication()
         commandPalettePanel.history = controller.recentClipboardItems()
-        commandPalettePanel.snippetGroups = controller.currentSnippetGroups()
         commandPalettePanel.show()
     }
 
@@ -389,7 +393,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pasteboard.setString(text, forType: .string)
     }
 
-    private func showClipboardPicker(_ kind: ClipboardMenuKind) {
+    private func showClipboardPicker(
+        _ kind: ClipboardMenuKind,
+        targetApplication capturedTarget: NSRunningApplication? = nil,
+        onReturn: (() -> Void)? = nil
+    ) {
         let mode: ClipboardPickerMode
         switch kind {
         case .combined:
@@ -398,7 +406,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             mode = .snippetsOnly
         }
 
-        let targetApplication = Self.currentPasteTargetApplication()
+        let targetApplication = capturedTarget ?? Self.currentPasteTargetApplication()
         clipboardPickerPanel.show(
             mode: mode,
             history: controller.recentClipboardItems(),
@@ -412,7 +420,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             onCancel: {
                 Self.reactivate(targetApplication)
-            }
+            },
+            onReturn: onReturn
         )
     }
 

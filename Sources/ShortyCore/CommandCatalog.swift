@@ -5,8 +5,8 @@ public enum CommandAction: Equatable, Sendable {
     /// Put text on the pasteboard, such as a converted timestamp.
     case copyText(String)
     case moveWindow(WindowMoveCommand)
-    /// Paste a history entry or snippet picked inside the box.
-    case paste(ClipboardPickerResult)
+    /// Hand over to the clipboard picker, which shows previews and snippets.
+    case openClipboard(ClipboardMenuKind)
 }
 
 public struct CommandEntry: Equatable, Identifiable, Sendable {
@@ -110,7 +110,7 @@ public enum CommandCatalog {
                 id: "clipboard.history",
                 title: "Clipboard History",
                 detail: history.isEmpty ? "Nothing copied yet" : "\(history.count) entries",
-                children: clipboardEntries(history: history, snippetGroups: snippetGroups),
+                action: .openClipboard(.combined),
                 keywords: ["paste", "copy", "clipboard", "snippet"]
             ),
             CommandEntry(
@@ -126,43 +126,6 @@ public enum CommandCatalog {
             windowEntry("left-monitor", "Move Window to Left Monitor", .moveToMonitor(.left)),
             windowEntry("right-monitor", "Move Window to Right Monitor", .moveToMonitor(.right)),
         ]
-    }
-
-    /// History and snippets as entries, so the box pastes them in place
-    /// instead of handing off to another window.
-    private static func clipboardEntries(
-        history: [ClipboardItem],
-        snippetGroups: [SnippetGroup]
-    ) -> [CommandEntry] {
-        var entries = history.prefix(ClipboardConstants.maxVisibleItems).map { item in
-            CommandEntry(
-                id: "clipboard.item.\(item.id)",
-                title: item.pickerLinePreview().title,
-                detail: item.source?.name,
-                action: .paste(.history(item))
-            )
-        }
-
-        for group in snippetGroups {
-            entries.append(
-                CommandEntry(
-                    id: "clipboard.snippets.\(group.title)",
-                    title: group.title,
-                    detail: "\(group.snippets.count) snippets",
-                    children: group.snippets.map { snippet in
-                        CommandEntry(
-                            id: "clipboard.snippet.\(group.title).\(snippet.title)",
-                            title: snippet.title,
-                            detail: snippet.content,
-                            action: .paste(.snippet(groupTitle: group.title, snippet: snippet))
-                        )
-                    },
-                    keywords: ["snippet"]
-                )
-            )
-        }
-
-        return entries
     }
 
     private static func windowEntry(
