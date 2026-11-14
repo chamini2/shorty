@@ -46,6 +46,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         commandPalettePanel.pickerRequestHandler = { [weak self] kind in
             self?.showCommandInsertionPicker(kind)
         }
+        commandPalettePanel.actionHandler = { [weak self] action in
+            DispatchQueue.main.async {
+                self?.performCommandAction(action)
+            }
+        }
         controller.windowSwitcherHandler = { [weak self] update in
             DispatchQueue.main.async {
                 self?.handleWindowSwitcherUpdate(update)
@@ -204,6 +209,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         NSWorkspace.shared.open(url)
+    }
+
+    private func performCommandAction(_ action: CommandAction) {
+        switch action {
+        case let .copyText(text):
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+
+        case let .moveWindow(command):
+            controller.performWindowMove(command)
+
+        case let .openClipboard(kind):
+            presentedPickerKind = kind
+            showClipboardPicker(kind)
+        }
     }
 
     private func showCommandPalette() {

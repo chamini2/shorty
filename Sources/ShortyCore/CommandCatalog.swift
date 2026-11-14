@@ -94,14 +94,7 @@ public enum CommandCatalog {
                 title: "Clipboard History",
                 detail: "Browse everything you copied",
                 action: .openClipboard(.combined),
-                keywords: ["paste", "copy", "clipboard"]
-            ),
-            CommandEntry(
-                id: "clipboard.snippets",
-                title: "Snippets",
-                detail: "Insert a configured snippet",
-                action: .openClipboard(.snippets),
-                keywords: ["text", "template"]
+                keywords: ["paste", "copy", "clipboard", "snippet"]
             ),
             CommandEntry(
                 id: "time",

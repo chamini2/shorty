@@ -13,7 +13,7 @@ final class CommandCatalogTests: XCTestCase {
         let entries = root("")
 
         XCTAssertEqual(entries.first?.title, "Clipboard History")
-        XCTAssertTrue(entries.contains { $0.title == "Snippets" })
+        XCTAssertFalse(entries.contains { $0.title == "Snippets" }, "the picker already lists them")
         XCTAssertEqual(entries.filter { $0.action == nil }.count, 1, "only Time is a group")
         XCTAssertEqual(
             entries.filter {

@@ -301,6 +301,11 @@ public final class ShortyController {
         }
     }
 
+    /// Window moves from somewhere other than a hotkey, such as the command box.
+    public func performWindowMove(_ command: WindowMoveCommand) {
+        moveFocusedWindow(command, hotKey: "command box")
+    }
+
     private func moveFocusedWindow(_ command: WindowMoveCommand, hotKey: String) {
         console.info("Hotkey `\(hotKey)` triggered window move action.")
         let result = windowMover.moveFocusedWindow(command)

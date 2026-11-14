@@ -5,7 +5,8 @@ import ShortyCore
 @MainActor
 final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFieldDelegate {
     private enum Metrics {
-        static let panelWidth: CGFloat = 760
+        static let panelWidth: CGFloat = 820
+        static let panelHeight: CGFloat = 440
         static let topPadding: CGFloat = 9
         static let emptyBottomPadding: CGFloat = 10
         static let resultBottomPadding: CGFloat = 5
@@ -21,12 +22,18 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
     private let panel: CommandPalettePanelWindow
     private let searchField = CommandPaletteTextField(frame: .zero)
     private let stackView = NSStackView()
-    private var entries: [CommandTransformerEvaluation] = []
+    private let scrollView = NSScrollView()
+    private let listContainer = CommandPaletteListContainerView()
+    private var entries: [CommandEntry] = []
     private var rowHeights: [CGFloat] = []
+    private var selectedIndex = 0
+    /// Set while the list shows a group's children, such as Time.
+    private var currentGroup: CommandEntry?
     private var isPresentingNestedPicker = false
     private var pendingInsertionRange: NSRange?
     private var selectionRangeAfterRefocus: NSRange?
     var pickerRequestHandler: ((ClipboardMenuKind) -> Void)?
+    var actionHandler: ((CommandAction) -> Void)?
 
     override init() {
         panel = CommandPalettePanelWindow(
@@ -49,6 +56,7 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
     func show() {
         searchField.stringValue = ""
         selectionRangeAfterRefocus = nil
+        currentGroup = nil
         updateResults()
         resizePanel()
         positionPanel()
@@ -110,11 +118,21 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
         switch commandSelector {
         case #selector(NSResponder.insertNewline(_:)),
             #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
-            copyFirstCompleteResult()
+            activateSelection()
+            return true
+
+        case #selector(NSResponder.moveUp(_:)):
+            moveSelection(by: -1)
+            return true
+
+        case #selector(NSResponder.moveDown(_:)):
+            moveSelection(by: 1)
             return true
 
         case #selector(NSResponder.cancelOperation(_:)):
-            hide()
+            if !leaveGroupIfNeeded() {
+                hide()
+            }
             return true
 
         default:
@@ -144,9 +162,21 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
         panel.contentView = container
 
         searchField.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
         stackView.translatesAutoresizingMaskIntoConstraints = false
+        listContainer.translatesAutoresizingMaskIntoConstraints = false
+
+        // The panel no longer grows with its rows, so the list scrolls.
+        scrollView.documentView = listContainer
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.horizontalScrollElasticity = .none
+        scrollView.borderType = .noBorder
+        listContainer.addSubview(stackView)
+
         container.addSubview(searchField)
-        container.addSubview(stackView)
+        container.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
             searchField.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.topPadding),
@@ -154,9 +184,17 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
             searchField.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Metrics.horizontalPadding),
             searchField.heightAnchor.constraint(equalToConstant: Metrics.searchHeight),
 
-            stackView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: Metrics.resultTopSpacing),
-            stackView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.horizontalPadding),
-            stackView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Metrics.horizontalPadding),
+            scrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: Metrics.resultTopSpacing),
+            scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.horizontalPadding),
+            scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Metrics.horizontalPadding),
+            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Metrics.resultBottomPadding),
+
+            listContainer.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
+
+            stackView.topAnchor.constraint(equalTo: listContainer.topAnchor),
+            stackView.leadingAnchor.constraint(equalTo: listContainer.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: listContainer.trailingAnchor),
+            stackView.bottomAnchor.constraint(equalTo: listContainer.bottomAnchor),
         ])
     }
 
@@ -183,41 +221,123 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
         stackView.spacing = Metrics.rowSpacing
     }
 
-    private func updateResults() {
-        entries = CommandTransformerEngine.evaluate(searchField.stringValue)
-        rowHeights = entries.map {
-            CommandPaletteResultRowView.height(for: $0, width: Metrics.panelWidth - Metrics.horizontalPadding * 2)
+    private func updateResults(resetSelection: Bool = true) {
+        let query = searchField.stringValue
+
+        if let currentGroup {
+            entries = CommandCatalog.entries(in: currentGroup, query: query)
+        } else {
+            entries = CommandCatalog.rootEntries(query: query)
         }
 
+        if resetSelection || !entries.indices.contains(selectedIndex) {
+            selectedIndex = 0
+        }
+
+        rowHeights = entries.map {
+            CommandPaletteEntryRowView.height(for: $0, width: Metrics.panelWidth - Metrics.horizontalPadding * 2)
+        }
+
+        renderRows()
+        resizePanel()
+        positionPanel()
+    }
+
+    private func renderRows() {
         for view in stackView.arrangedSubviews {
             stackView.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
 
-        for (entry, rowHeight) in zip(entries, rowHeights) {
-            let row = CommandPaletteResultRowView(evaluation: entry)
+        for (index, pair) in zip(entries, rowHeights).enumerated() {
+            let row = CommandPaletteEntryRowView(entry: pair.0, isSelected: index == selectedIndex)
             row.translatesAutoresizingMaskIntoConstraints = false
             stackView.addArrangedSubview(row)
             NSLayoutConstraint.activate([
                 row.widthAnchor.constraint(equalTo: stackView.widthAnchor),
-                row.heightAnchor.constraint(equalToConstant: rowHeight),
+                row.heightAnchor.constraint(equalToConstant: pair.1),
             ])
         }
+    }
 
-        resizePanel()
-        positionPanel()
+    private func moveSelection(by offset: Int) {
+        guard !entries.isEmpty else {
+            return
+        }
+
+        let count = entries.count
+        selectedIndex = ((selectedIndex + offset) % count + count) % count
+        renderRows()
+        panel.contentView?.layoutSubtreeIfNeeded()
+        scrollSelectionIntoView()
+    }
+
+    /// Runs the selected entry, or opens it when it is a group.
+    private func activateSelection() {
+        guard entries.indices.contains(selectedIndex) else {
+            NSSound.beep()
+            return
+        }
+
+        let entry = entries[selectedIndex]
+
+        if entry.isGroup {
+            enterGroup(entry)
+            return
+        }
+
+        guard let action = entry.action else {
+            NSSound.beep()
+            return
+        }
+
+        hide()
+        actionHandler?(action)
+    }
+
+    private func enterGroup(_ group: CommandEntry) {
+        currentGroup = group
+        searchField.stringValue = ""
+        updateResults()
+    }
+
+    @discardableResult
+    private func leaveGroupIfNeeded() -> Bool {
+        guard currentGroup != nil else {
+            return false
+        }
+
+        currentGroup = nil
+        searchField.stringValue = ""
+        updateResults()
+        return true
     }
 
     private func resizePanel() {
-        let rowsHeight = rowHeights.reduce(CGFloat(0), +) + CGFloat(max(0, rowHeights.count - 1)) * Metrics.rowSpacing
-        let resultsHeight = entries.isEmpty
-            ? 0
-            : Metrics.resultTopSpacing + rowsHeight
-        let bottomPadding = entries.isEmpty ? Metrics.emptyBottomPadding : Metrics.resultBottomPadding
-        let panelHeight = Metrics.topPadding + Metrics.searchHeight + resultsHeight + bottomPadding
-
-        panel.setContentSize(NSSize(width: Metrics.panelWidth, height: panelHeight))
+        panel.setContentSize(NSSize(width: Metrics.panelWidth, height: Metrics.panelHeight))
         panel.contentView?.layoutSubtreeIfNeeded()
+    }
+
+    /// Keeps the selected row on screen once the list is taller than the panel.
+    private func scrollSelectionIntoView() {
+        guard entries.indices.contains(selectedIndex) else {
+            return
+        }
+
+        let rowTop = rowHeights.prefix(selectedIndex).reduce(CGFloat(0), +)
+            + CGFloat(selectedIndex) * Metrics.rowSpacing
+        let rowBottom = rowTop + rowHeights[selectedIndex]
+        let viewport = scrollView.contentView.bounds
+        var offset = viewport.origin.y
+
+        if rowTop < offset {
+            offset = rowTop
+        } else if rowBottom > offset + viewport.height {
+            offset = rowBottom - viewport.height
+        }
+
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: max(0, offset)))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     private func positionPanel() {
@@ -242,17 +362,7 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
         )
     }
 
-    private func copyFirstCompleteResult() {
-        guard let result = entries.first(where: \.isComplete)?.resultText else {
-            NSSound.beep()
-            return
-        }
 
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(result, forType: .string)
-        hide()
-    }
 
     private func handleKeyDown(_ event: NSEvent) -> Bool {
         if handleCommandKey(event) {
@@ -261,12 +371,33 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
 
         switch UInt32(event.keyCode) {
         case UInt32(kVK_Escape):
-            hide()
+            if !leaveGroupIfNeeded() {
+                hide()
+            }
             return true
 
         case UInt32(kVK_Return), UInt32(kVK_ANSI_KeypadEnter):
-            copyFirstCompleteResult()
+            activateSelection()
             return true
+
+        case UInt32(kVK_UpArrow):
+            moveSelection(by: -1)
+            return true
+
+        case UInt32(kVK_DownArrow):
+            moveSelection(by: 1)
+            return true
+
+        case UInt32(kVK_RightArrow):
+            guard entries.indices.contains(selectedIndex), entries[selectedIndex].isGroup else {
+                return false
+            }
+
+            enterGroup(entries[selectedIndex])
+            return true
+
+        case UInt32(kVK_LeftArrow):
+            return leaveGroupIfNeeded()
 
         default:
             return false
@@ -397,107 +528,75 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
 }
 
 @MainActor
-private final class CommandPaletteResultRowView: NSView {
+private final class CommandPaletteEntryRowView: NSView {
     private enum Metrics {
         static let horizontalPadding: CGFloat = 8
         static let topPadding: CGFloat = 6
-        static let valueTopSpacing: CGFloat = 4
+        static let detailTopSpacing: CGFloat = 4
         static let bottomPadding: CGFloat = 4
-        static let nameFontSize: CGFloat = 12
-        static let valueFontSize: CGFloat = 15
+        static let titleFontSize: CGFloat = 15
+        static let detailFontSize: CGFloat = 12
         static let lineHeight: CGFloat = 19
+        static let cornerRadius: CGFloat = 6
     }
 
-    init(evaluation: CommandTransformerEvaluation) {
+    init(entry: CommandEntry, isSelected: Bool) {
         super.init(frame: .zero)
 
         wantsLayer = true
+        layer?.cornerRadius = Metrics.cornerRadius
+        layer?.backgroundColor = isSelected
+            ? NSColor(calibratedWhite: 1, alpha: 0.12).cgColor
+            : NSColor.clear.cgColor
 
-        let nameField = NSTextField(labelWithString: evaluation.transformerName)
-        nameField.font = Self.nameFont
-        nameField.textColor = .secondaryLabelColor
-        nameField.lineBreakMode = .byTruncatingTail
-        nameField.translatesAutoresizingMaskIntoConstraints = false
-
-        let valueField = NSTextField(labelWithAttributedString: Self.valueString(for: evaluation))
-        valueField.font = Self.valueFont
-        valueField.lineBreakMode = .byTruncatingTail
-        valueField.maximumNumberOfLines = 0
-        valueField.usesSingleLineMode = false
-        valueField.isSelectable = true
-        valueField.isEditable = false
-        valueField.isBordered = false
-        valueField.drawsBackground = false
-        valueField.translatesAutoresizingMaskIntoConstraints = false
-
-        addSubview(nameField)
-        addSubview(valueField)
+        let titleField = NSTextField(labelWithString: entry.isGroup ? "\(entry.title) ›" : entry.title)
+        titleField.font = Self.titleFont
+        titleField.textColor = isSelected ? .labelColor : .secondaryLabelColor
+        titleField.lineBreakMode = .byTruncatingTail
+        titleField.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(titleField)
 
         NSLayoutConstraint.activate([
-            nameField.topAnchor.constraint(equalTo: topAnchor, constant: Metrics.topPadding),
-            nameField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
-            nameField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
+            titleField.topAnchor.constraint(equalTo: topAnchor, constant: Metrics.topPadding),
+            titleField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
+            titleField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
+        ])
 
-            valueField.topAnchor.constraint(equalTo: nameField.bottomAnchor, constant: Metrics.valueTopSpacing),
-            valueField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
-            valueField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
-            valueField.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -Metrics.bottomPadding),
+        guard let detail = entry.detail, !detail.isEmpty else {
+            return
+        }
+
+        let detailField = NSTextField(labelWithString: detail)
+        detailField.font = Self.detailFont
+        detailField.textColor = .secondaryLabelColor
+        detailField.lineBreakMode = .byTruncatingTail
+        detailField.maximumNumberOfLines = 0
+        detailField.usesSingleLineMode = false
+        detailField.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(detailField)
+
+        NSLayoutConstraint.activate([
+            detailField.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: Metrics.detailTopSpacing),
+            detailField.leadingAnchor.constraint(equalTo: titleField.leadingAnchor),
+            detailField.trailingAnchor.constraint(equalTo: titleField.trailingAnchor),
         ])
     }
 
-    @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        nil
     }
 
-    static func height(for evaluation: CommandTransformerEvaluation, width: CGFloat) -> CGFloat {
-        let value = evaluation.resultText ?? evaluation.displayText
-        let lineCount = max(1, value.components(separatedBy: .newlines).count)
-        return Metrics.topPadding +
-            ceil(Self.nameFont.ascender - Self.nameFont.descender + Self.nameFont.leading) +
-            Metrics.valueTopSpacing +
-            CGFloat(lineCount) * Metrics.lineHeight +
-            Metrics.bottomPadding
+    static func height(for entry: CommandEntry, width: CGFloat) -> CGFloat {
+        let detailLines = entry.detail.map { max(1, $0.split(separator: "\n", omittingEmptySubsequences: false).count) } ?? 0
+        let detailHeight = detailLines == 0
+            ? 0
+            : Metrics.detailTopSpacing + CGFloat(detailLines) * Metrics.lineHeight
+
+        return Metrics.topPadding + Metrics.lineHeight + detailHeight + Metrics.bottomPadding
     }
 
-    private static func valueString(for evaluation: CommandTransformerEvaluation) -> NSAttributedString {
-        if let resultText = evaluation.resultText {
-            return NSAttributedString(
-                string: resultText,
-                attributes: [
-                    .font: Self.valueFont,
-                    .foregroundColor: NSColor.labelColor,
-                ]
-            )
-        }
-
-        let attributed = NSMutableAttributedString()
-        for segment in evaluation.segments {
-            attributed.append(
-                NSAttributedString(
-                    string: segment.text,
-                    attributes: [
-                        .font: Self.valueFont,
-                        .foregroundColor: color(for: segment.kind),
-                    ]
-                )
-            )
-        }
-
-        return attributed
-    }
-
-    private static func color(for kind: CommandDisplaySegmentKind) -> NSColor {
-        switch kind {
-        case .matched:
-            return .labelColor
-        case .placeholder:
-            return .secondaryLabelColor
-        }
-    }
-
-    private static let nameFont = NSFont.systemFont(ofSize: Metrics.nameFontSize, weight: .medium)
-    private static let valueFont = NSFont.monospacedSystemFont(ofSize: Metrics.valueFontSize, weight: .regular)
+    private static let titleFont = NSFont.systemFont(ofSize: Metrics.titleFontSize, weight: .regular)
+    private static let detailFont = NSFont.monospacedSystemFont(ofSize: Metrics.detailFontSize, weight: .regular)
 }
 
 @MainActor
@@ -531,5 +630,13 @@ private final class CommandPaletteTextField: NSTextField {
         }
 
         super.keyDown(with: event)
+    }
+}
+
+
+/// Flipped, so the list fills from the top of the scroll view.
+private final class CommandPaletteListContainerView: NSView {
+    override var isFlipped: Bool {
+        true
     }
 }
