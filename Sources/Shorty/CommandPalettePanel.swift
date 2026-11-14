@@ -27,14 +27,16 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
     private var entries: [CommandEntry] = []
     private var rowHeights: [CGFloat] = []
     private var selectedIndex = 0
-    /// Set while the list shows a group's children, such as Time.
-    private var currentGroup: CommandEntry?
+    /// Groups entered so far, such as Clipboard History then a snippet group.
+    private var groupStack: [CommandEntry] = []
     private var isPresentingNestedPicker = false
     private var pendingInsertionRange: NSRange?
     private var selectionRangeAfterRefocus: NSRange?
     var pickerRequestHandler: ((ClipboardMenuKind) -> Void)?
     var actionHandler: ((CommandAction) -> Void)?
     var settings: CommandBoxSettings = .default
+    var history: [ClipboardItem] = []
+    var snippetGroups: [SnippetGroup] = []
 
     override init() {
         panel = CommandPalettePanelWindow(
@@ -57,7 +59,7 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
     func show() {
         searchField.stringValue = ""
         selectionRangeAfterRefocus = nil
-        currentGroup = nil
+        groupStack = []
         updateResults()
         resizePanel()
         positionPanel()
@@ -225,10 +227,15 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
     private func updateResults(resetSelection: Bool = true) {
         let query = searchField.stringValue
 
-        if let currentGroup {
+        if let currentGroup = groupStack.last {
             entries = CommandCatalog.entries(in: currentGroup, query: query)
         } else {
-            entries = CommandCatalog.rootEntries(query: query, settings: settings)
+            entries = CommandCatalog.rootEntries(
+                query: query,
+                settings: settings,
+                history: history,
+                snippetGroups: snippetGroups
+            )
         }
 
         if resetSelection || !entries.indices.contains(selectedIndex) {
@@ -297,18 +304,18 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
     }
 
     private func enterGroup(_ group: CommandEntry) {
-        currentGroup = group
+        groupStack.append(group)
         searchField.stringValue = ""
         updateResults()
     }
 
     @discardableResult
     private func leaveGroupIfNeeded() -> Bool {
-        guard currentGroup != nil else {
+        guard !groupStack.isEmpty else {
             return false
         }
 
-        currentGroup = nil
+        groupStack.removeLast()
         searchField.stringValue = ""
         updateResults()
         return true
@@ -534,10 +541,12 @@ private final class CommandPaletteEntryRowView: NSView {
         static let horizontalPadding: CGFloat = 8
         static let topPadding: CGFloat = 6
         static let detailTopSpacing: CGFloat = 4
+        static let detailSpacing: CGFloat = 12
         static let bottomPadding: CGFloat = 4
-        static let titleFontSize: CGFloat = 15
+        static let titleFontSize: CGFloat = 13
         static let detailFontSize: CGFloat = 12
-        static let lineHeight: CGFloat = 19
+        static let lineHeight: CGFloat = 18
+        static let singleLineHeight: CGFloat = 26
         static let cornerRadius: CGFloat = 6
     }
 
@@ -558,12 +567,12 @@ private final class CommandPaletteEntryRowView: NSView {
         addSubview(titleField)
 
         NSLayoutConstraint.activate([
-            titleField.topAnchor.constraint(equalTo: topAnchor, constant: Metrics.topPadding),
             titleField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
-            titleField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
         ])
 
         guard let detail = entry.detail, !detail.isEmpty else {
+            titleField.topAnchor.constraint(equalTo: topAnchor, constant: Metrics.topPadding).isActive = true
+            titleField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding).isActive = true
             return
         }
 
@@ -571,12 +580,33 @@ private final class CommandPaletteEntryRowView: NSView {
         detailField.font = Self.detailFont
         detailField.textColor = .secondaryLabelColor
         detailField.lineBreakMode = .byTruncatingTail
-        detailField.maximumNumberOfLines = 0
-        detailField.usesSingleLineMode = false
         detailField.translatesAutoresizingMaskIntoConstraints = false
         addSubview(detailField)
 
+        // One-line details sit beside the title, which keeps lists such as the
+        // time zones compact. Only multi-line results need their own block.
+        guard Self.isMultiline(detail) else {
+            detailField.alignment = .right
+            detailField.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+
+            NSLayoutConstraint.activate([
+                titleField.centerYAnchor.constraint(equalTo: centerYAnchor),
+                detailField.centerYAnchor.constraint(equalTo: centerYAnchor),
+                detailField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
+                detailField.leadingAnchor.constraint(
+                    greaterThanOrEqualTo: titleField.trailingAnchor,
+                    constant: Metrics.detailSpacing
+                ),
+            ])
+            return
+        }
+
+        detailField.maximumNumberOfLines = 0
+        detailField.usesSingleLineMode = false
+
         NSLayoutConstraint.activate([
+            titleField.topAnchor.constraint(equalTo: topAnchor, constant: Metrics.topPadding),
+            titleField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
             detailField.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: Metrics.detailTopSpacing),
             detailField.leadingAnchor.constraint(equalTo: titleField.leadingAnchor),
             detailField.trailingAnchor.constraint(equalTo: titleField.trailingAnchor),
@@ -588,12 +618,21 @@ private final class CommandPaletteEntryRowView: NSView {
     }
 
     static func height(for entry: CommandEntry, width: CGFloat) -> CGFloat {
-        let detailLines = entry.detail.map { max(1, $0.split(separator: "\n", omittingEmptySubsequences: false).count) } ?? 0
-        let detailHeight = detailLines == 0
-            ? 0
-            : Metrics.detailTopSpacing + CGFloat(detailLines) * Metrics.lineHeight
+        guard let detail = entry.detail, isMultiline(detail) else {
+            return Metrics.singleLineHeight
+        }
 
-        return Metrics.topPadding + Metrics.lineHeight + detailHeight + Metrics.bottomPadding
+        let lines = max(1, detail.split(separator: "\n", omittingEmptySubsequences: false).count)
+
+        return Metrics.topPadding
+            + Metrics.lineHeight
+            + Metrics.detailTopSpacing
+            + CGFloat(lines) * Metrics.lineHeight
+            + Metrics.bottomPadding
+    }
+
+    private static func isMultiline(_ detail: String) -> Bool {
+        detail.contains("\n")
     }
 
     private static let titleFont = NSFont.systemFont(ofSize: Metrics.titleFontSize, weight: .regular)

@@ -71,6 +71,10 @@ public enum TimeZoneResolver {
             throw CommandBoxSettingsError.ambiguousTimeZone(name: trimmed, matches: cityMatches.sorted())
         }
 
+        if let aliased = Self.aliases[needle], let timeZone = TimeZone(identifier: aliased) {
+            return timeZone
+        }
+
         if let abbreviated = TimeZone(abbreviation: trimmed.uppercased()) {
             return abbreviated
         }
@@ -84,8 +88,10 @@ public enum TimeZoneResolver {
             return []
         }
 
-        return TimeZone.knownTimeZoneIdentifiers
-            .filter { normalized(city(of: $0)).contains(needle) }
+        let aliasHits = aliases.filter { $0.key.contains(needle) }.values
+
+        return (Array(aliasHits) + TimeZone.knownTimeZoneIdentifiers)
+            .filter { normalized(city(of: $0)).contains(needle) || aliasHits.contains($0) }
             .sorted()
             .prefix(limit)
             .map { $0 }
@@ -102,6 +108,49 @@ public enum TimeZoneResolver {
         let name = city(of: timeZone.identifier).replacingOccurrences(of: "_", with: " ")
         return name.isEmpty ? nil : name
     }
+
+    /// Countries, regions and cities that are not the zone's own city. People
+    /// say "India" and "San Francisco", not "Asia/Kolkata".
+    private static let aliases: [String: String] = [
+        "india": "Asia/Kolkata",
+        "japan": "Asia/Tokyo",
+        "korea": "Asia/Seoul",
+        "south_korea": "Asia/Seoul",
+        "turkey": "Europe/Istanbul",
+        "china": "Asia/Shanghai",
+        "uk": "Europe/London",
+        "england": "Europe/London",
+        "britain": "Europe/London",
+        "germany": "Europe/Berlin",
+        "france": "Europe/Paris",
+        "spain": "Europe/Madrid",
+        "italy": "Europe/Rome",
+        "netherlands": "Europe/Amsterdam",
+        "poland": "Europe/Warsaw",
+        "portugal": "Europe/Lisbon",
+        "ireland": "Europe/Dublin",
+        "israel": "Asia/Jerusalem",
+        "singapore": "Asia/Singapore",
+        "san_francisco": "America/Los_Angeles",
+        "sf": "America/Los_Angeles",
+        "bay_area": "America/Los_Angeles",
+        "nyc": "America/New_York",
+        "seattle": "America/Los_Angeles",
+        "austin": "America/Chicago",
+        "boston": "America/New_York",
+        "miami": "America/New_York",
+        "washington": "America/New_York",
+        "venezuela": "America/Caracas",
+        "argentina": "America/Argentina/Buenos_Aires",
+        "brazil": "America/Sao_Paulo",
+        "mexico": "America/Mexico_City",
+        "australia": "Australia/Sydney",
+        "sydney": "Australia/Sydney",
+        "pacific": "America/Los_Angeles",
+        "eastern": "America/New_York",
+        "central": "America/Chicago",
+        "mountain": "America/Denver",
+    ]
 
     private static func city(of identifier: String) -> String {
         identifier.split(separator: "/").last.map(String.init) ?? identifier

@@ -275,7 +275,7 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         return title.shortyTruncated(maxLength: contentMaxLength) + suffix
     }
 
-    func pickerLinePreview(maxTitleLength: Int = ClipboardConstants.maxPickerItemTitleLength) -> ClipboardLinePreview {
+    public func pickerLinePreview(maxTitleLength: Int = ClipboardConstants.maxPickerItemTitleLength) -> ClipboardLinePreview {
         let preview = linePreview()
         return ClipboardLinePreview(
             title: preview.title.shortyTruncated(maxLength: maxTitleLength),
@@ -501,11 +501,11 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-struct ClipboardLinePreview: Equatable, Sendable {
-    let title: String
-    let additionalLineCount: Int
+public struct ClipboardLinePreview: Equatable, Sendable {
+    public let title: String
+    public let additionalLineCount: Int
 
-    var trailingLineCountLabel: String? {
+    public var trailingLineCountLabel: String? {
         additionalLineCount > 0 ? "+\(additionalLineCount)" : nil
     }
 }

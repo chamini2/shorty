@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dynamicShortcutItems: [NSMenuItem] = []
     private let clipboardPickerPanel = ClipboardPickerPanelController()
     private var presentedPickerKind: ClipboardMenuKind?
+    private var commandPaletteTargetApplication: NSRunningApplication?
     private let commandPalettePanel = CommandPalettePanelController()
     private let windowSwitcherPanel = WindowSwitcherPanelController()
 
@@ -226,9 +227,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let .moveWindow(command):
             controller.performWindowMove(command)
 
-        case let .openClipboard(kind):
-            presentedPickerKind = kind
-            showClipboardPicker(kind)
+        case let .paste(result):
+            pastePickerResult(
+                result,
+                activationMode: .standard,
+                targetApplication: commandPaletteTargetApplication
+            )
+            commandPaletteTargetApplication = nil
         }
     }
 
@@ -239,6 +244,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Captured before the box takes focus, so a paste lands where it was.
+        commandPaletteTargetApplication = Self.currentPasteTargetApplication()
+        commandPalettePanel.history = controller.recentClipboardItems()
+        commandPalettePanel.snippetGroups = controller.currentSnippetGroups()
         commandPalettePanel.show()
     }
 

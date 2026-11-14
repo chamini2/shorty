@@ -5,7 +5,8 @@ public enum CommandAction: Equatable, Sendable {
     /// Put text on the pasteboard, such as a converted timestamp.
     case copyText(String)
     case moveWindow(WindowMoveCommand)
-    case openClipboard(ClipboardMenuKind)
+    /// Paste a history entry or snippet picked inside the box.
+    case paste(ClipboardPickerResult)
 }
 
 public struct CommandEntry: Equatable, Identifiable, Sendable {
@@ -49,10 +50,18 @@ public enum CommandCatalog {
         now: Date = Date(),
         localTimeZone: TimeZone = .current,
         settings: CommandBoxSettings = .default,
+        history: [ClipboardItem] = [],
+        snippetGroups: [SnippetGroup] = [],
         transformers: [CommandTransformer] = CommandTransformerEngine.defaultTransformers
     ) -> [CommandEntry] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let actions = actionEntries(now: now, localTimeZone: localTimeZone, settings: settings)
+        let actions = actionEntries(
+            now: now,
+            localTimeZone: localTimeZone,
+            settings: settings,
+            history: history,
+            snippetGroups: snippetGroups
+        )
 
         return resultEntries(query: normalizedQuery, now: now, transformers: transformers)
             + matching(actions, query: normalizedQuery)
@@ -92,14 +101,16 @@ public enum CommandCatalog {
     private static func actionEntries(
         now: Date,
         localTimeZone: TimeZone,
-        settings: CommandBoxSettings
+        settings: CommandBoxSettings,
+        history: [ClipboardItem],
+        snippetGroups: [SnippetGroup]
     ) -> [CommandEntry] {
         [
             CommandEntry(
                 id: "clipboard.history",
                 title: "Clipboard History",
-                detail: "Browse everything you copied",
-                action: .openClipboard(.combined),
+                detail: history.isEmpty ? "Nothing copied yet" : "\(history.count) entries",
+                children: clipboardEntries(history: history, snippetGroups: snippetGroups),
                 keywords: ["paste", "copy", "clipboard", "snippet"]
             ),
             CommandEntry(
@@ -115,6 +126,43 @@ public enum CommandCatalog {
             windowEntry("left-monitor", "Move Window to Left Monitor", .moveToMonitor(.left)),
             windowEntry("right-monitor", "Move Window to Right Monitor", .moveToMonitor(.right)),
         ]
+    }
+
+    /// History and snippets as entries, so the box pastes them in place
+    /// instead of handing off to another window.
+    private static func clipboardEntries(
+        history: [ClipboardItem],
+        snippetGroups: [SnippetGroup]
+    ) -> [CommandEntry] {
+        var entries = history.prefix(ClipboardConstants.maxVisibleItems).map { item in
+            CommandEntry(
+                id: "clipboard.item.\(item.id)",
+                title: item.pickerLinePreview().title,
+                detail: item.source?.name,
+                action: .paste(.history(item))
+            )
+        }
+
+        for group in snippetGroups {
+            entries.append(
+                CommandEntry(
+                    id: "clipboard.snippets.\(group.title)",
+                    title: group.title,
+                    detail: "\(group.snippets.count) snippets",
+                    children: group.snippets.map { snippet in
+                        CommandEntry(
+                            id: "clipboard.snippet.\(group.title).\(snippet.title)",
+                            title: snippet.title,
+                            detail: snippet.content,
+                            action: .paste(.snippet(groupTitle: group.title, snippet: snippet))
+                        )
+                    },
+                    keywords: ["snippet"]
+                )
+            )
+        }
+
+        return entries
     }
 
     private static func windowEntry(
@@ -136,15 +184,20 @@ public enum CommandCatalog {
         localTimeZone: TimeZone,
         settings: CommandBoxSettings
     ) -> [CommandEntry] {
-        let zones = [
-            // Named after the zone's city, falling back for `GMT` and the like.
-            CommandTimeZone(
-                label: TimeZoneResolver.cityLabel(for: localTimeZone) ?? "Local",
-                timeZone: localTimeZone
-            ),
-            CommandTimeZone(label: "UTC", timeZone: TimeZone(secondsFromGMT: 0)!),
-        ] + settings.timeZones
+        // A configured list replaces the defaults rather than extending them,
+        // so its order is the order shown.
+        let zones = settings.timeZones.isEmpty
+            ? [
+                // Named after the zone's city, falling back for `GMT` and the like.
+                CommandTimeZone(
+                    label: TimeZoneResolver.cityLabel(for: localTimeZone) ?? "Local",
+                    timeZone: localTimeZone
+                ),
+                CommandTimeZone(label: "UTC", timeZone: TimeZone(secondsFromGMT: 0)!),
+            ]
+            : settings.timeZones
 
+        // Shown in the order the config lists them.
         return zones.map { zone in
             let text = CommandTransformerEngine.currentTime(in: zone.timeZone, now: now)
 
