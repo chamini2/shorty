@@ -91,6 +91,18 @@ public enum TimeZoneResolver {
             .map { $0 }
     }
 
+    /// The zone's city, as a label: `Europe/Madrid` reads as `Madrid`. This is
+    /// the zone's representative city, not where you physically are, so
+    /// someone in Barcelona still sees Madrid.
+    public static func cityLabel(for timeZone: TimeZone) -> String? {
+        guard timeZone.identifier.contains("/") else {
+            return nil
+        }
+
+        let name = city(of: timeZone.identifier).replacingOccurrences(of: "_", with: " ")
+        return name.isEmpty ? nil : name
+    }
+
     private static func city(of identifier: String) -> String {
         identifier.split(separator: "/").last.map(String.init) ?? identifier
     }

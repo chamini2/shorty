@@ -45,6 +45,23 @@ final class CommandBoxSettingsTests: XCTestCase {
         XCTAssertThrowsError(try CommandBoxSettingsParser.parse(yaml: "command-box:\n  timezones: [Nowhere]"))
     }
 
+    func testLocalZoneIsNamedAfterItsCity() {
+        XCTAssertEqual(TimeZoneResolver.cityLabel(for: TimeZone(identifier: "Europe/Madrid")!), "Madrid")
+        XCTAssertEqual(TimeZoneResolver.cityLabel(for: TimeZone(identifier: "America/New_York")!), "New York")
+        XCTAssertNil(TimeZoneResolver.cityLabel(for: TimeZone(secondsFromGMT: 0)!))
+    }
+
+    func testTimeGroupLabelsTheLocalRowWithTheCity() throws {
+        let root = CommandCatalog.rootEntries(
+            query: "",
+            now: Date(timeIntervalSince1970: 0),
+            localTimeZone: TimeZone(identifier: "America/Caracas")!
+        )
+        let time = try XCTUnwrap(root.first { $0.title == "Time" })
+
+        XCTAssertEqual(CommandCatalog.entries(in: time, query: "").map(\.title), ["Caracas", "UTC"])
+    }
+
     func testTimeGroupShowsLocalAndUTCThenConfiguredZones() throws {
         let settings = try CommandBoxSettingsParser.parse(yaml: """
         command-box:

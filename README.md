@@ -208,7 +208,8 @@ remembering. Arrow keys move, `return` runs the selection, `right` opens a
 group and `left` leaves it. Typing filters by name, and timestamps or sizes you
 type are converted at the top of the list.
 
-`Time` shows your local zone and UTC. Add more by name, no identifiers needed:
+`Time` shows your own zone, named after its city, and UTC. Add more by name, no
+identifiers needed:
 
 ```yaml
 command-box:

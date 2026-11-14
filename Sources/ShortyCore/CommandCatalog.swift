@@ -137,7 +137,11 @@ public enum CommandCatalog {
         settings: CommandBoxSettings
     ) -> [CommandEntry] {
         let zones = [
-            CommandTimeZone(label: "Local", timeZone: localTimeZone),
+            // Named after the zone's city, falling back for `GMT` and the like.
+            CommandTimeZone(
+                label: TimeZoneResolver.cityLabel(for: localTimeZone) ?? "Local",
+                timeZone: localTimeZone
+            ),
             CommandTimeZone(label: "UTC", timeZone: TimeZone(secondsFromGMT: 0)!),
         ] + settings.timeZones
 
