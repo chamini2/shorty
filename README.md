@@ -201,6 +201,27 @@ hotkeys:
 
 Bindings apply on config reload, so no restart is needed.
 
+## Command Box
+
+The command box lists what Shorty can do, so you can browse instead of
+remembering. Arrow keys move, `return` runs the selection, `right` opens a
+group and `left` leaves it. Typing filters by name, and timestamps or sizes you
+type are converted at the top of the list.
+
+`Time` shows your local zone and UTC. Add more by name, no identifiers needed:
+
+```yaml
+command-box:
+  timezones:
+    - Tokyo
+    - New York
+    - Istanbul
+```
+
+A city name, a zone identifier such as `Asia/Tokyo`, or an abbreviation such as
+`JST` all work, and the name you write becomes the label. A name that does not
+resolve fails the config with suggestions.
+
 ## Setup
 
 ### Requirements

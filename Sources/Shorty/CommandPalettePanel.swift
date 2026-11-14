@@ -34,6 +34,7 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
     private var selectionRangeAfterRefocus: NSRange?
     var pickerRequestHandler: ((ClipboardMenuKind) -> Void)?
     var actionHandler: ((CommandAction) -> Void)?
+    var settings: CommandBoxSettings = .default
 
     override init() {
         panel = CommandPalettePanelWindow(
@@ -227,7 +228,7 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
         if let currentGroup {
             entries = CommandCatalog.entries(in: currentGroup, query: query)
         } else {
-            entries = CommandCatalog.rootEntries(query: query)
+            entries = CommandCatalog.rootEntries(query: query, settings: settings)
         }
 
         if resetSelection || !entries.indices.contains(selectedIndex) {

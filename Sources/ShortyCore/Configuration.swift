@@ -235,6 +235,7 @@ public struct LoadedConfiguration {
     public let shortcuts: [LoadedShortcut]
     public let snippetGroups: [SnippetGroup]
     public let bindings: HotKeyBindings
+    public let commandBox: CommandBoxSettings
     /// Shared by shortcuts and built-in bindings, so both see the same claims.
     public let numpadAliases: NumpadAliasResolver
 }
@@ -414,7 +415,8 @@ public enum ConfigurationLoader {
         let configuration = try YAMLDecoder().decode(ConfigurationFile.self, from: contents)
         let snippetGroups = try parseSnippetGroups(from: contents)
         let bindings = try HotKeyBindingsParser.parse(yaml: contents)
-        let customizesBindings = bindings != .default
+        let commandBox = try CommandBoxSettingsParser.parse(yaml: contents)
+        let customizesBindings = bindings != .default || commandBox != .default
 
         guard !configuration.shortcuts.isEmpty || !snippetGroups.isEmpty || customizesBindings else {
             throw ConfigurationError.emptyConfiguration
@@ -495,6 +497,7 @@ public enum ConfigurationLoader {
             shortcuts: loadedShortcuts,
             snippetGroups: snippetGroups,
             bindings: bindings,
+            commandBox: commandBox,
             numpadAliases: numpadAliases
         )
     }

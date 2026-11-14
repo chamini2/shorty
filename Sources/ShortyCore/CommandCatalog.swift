@@ -48,12 +48,14 @@ public enum CommandCatalog {
         query: String,
         now: Date = Date(),
         localTimeZone: TimeZone = .current,
+        settings: CommandBoxSettings = .default,
         transformers: [CommandTransformer] = CommandTransformerEngine.defaultTransformers
     ) -> [CommandEntry] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let actions = actionEntries(now: now, localTimeZone: localTimeZone, settings: settings)
 
         return resultEntries(query: normalizedQuery, now: now, transformers: transformers)
-            + matching(actionEntries(now: now, localTimeZone: localTimeZone), query: normalizedQuery)
+            + matching(actions, query: normalizedQuery)
     }
 
     public static func entries(in group: CommandEntry, query: String) -> [CommandEntry] {
@@ -87,7 +89,11 @@ public enum CommandCatalog {
             }
     }
 
-    private static func actionEntries(now: Date, localTimeZone: TimeZone) -> [CommandEntry] {
+    private static func actionEntries(
+        now: Date,
+        localTimeZone: TimeZone,
+        settings: CommandBoxSettings
+    ) -> [CommandEntry] {
         [
             CommandEntry(
                 id: "clipboard.history",
@@ -100,7 +106,7 @@ public enum CommandCatalog {
                 id: "time",
                 title: "Time",
                 detail: "Current time around the world",
-                children: timeEntries(now: now, localTimeZone: localTimeZone),
+                children: timeEntries(now: now, localTimeZone: localTimeZone, settings: settings),
                 keywords: ["clock", "timezone", "zone", "utc"]
             ),
             windowEntry("left-half", "Move Window Left Half", .cycleHalf(.left)),
@@ -124,41 +130,29 @@ public enum CommandCatalog {
         )
     }
 
-    private static func timeEntries(now: Date, localTimeZone: TimeZone) -> [CommandEntry] {
-        var zones: [(name: String, timeZone: TimeZone)] = [
-            ("Local", localTimeZone),
-            ("UTC", TimeZone(secondsFromGMT: 0)!),
-        ]
-
-        for (name, identifier) in Self.namedZones {
-            guard let timeZone = TimeZone(identifier: identifier) else {
-                continue
-            }
-
-            zones.append((name, timeZone))
-        }
+    /// Local and UTC always; anything else comes from the config.
+    private static func timeEntries(
+        now: Date,
+        localTimeZone: TimeZone,
+        settings: CommandBoxSettings
+    ) -> [CommandEntry] {
+        let zones = [
+            CommandTimeZone(label: "Local", timeZone: localTimeZone),
+            CommandTimeZone(label: "UTC", timeZone: TimeZone(secondsFromGMT: 0)!),
+        ] + settings.timeZones
 
         return zones.map { zone in
             let text = CommandTransformerEngine.currentTime(in: zone.timeZone, now: now)
 
             return CommandEntry(
-                id: "time.\(zone.timeZone.identifier)",
-                title: zone.name,
+                id: "time.\(zone.label)",
+                title: zone.label,
                 detail: text,
                 action: .copyText(text),
                 keywords: [zone.timeZone.identifier]
             )
         }
     }
-
-    private static let namedZones: [(String, String)] = [
-        ("ET", "America/New_York"),
-        ("CET", "Europe/Paris"),
-        ("Turkey", "Europe/Istanbul"),
-        ("Dubai", "Asia/Dubai"),
-        ("Korea", "Asia/Seoul"),
-        ("Japan", "Asia/Tokyo"),
-    ]
 
     private static func matching(_ entries: [CommandEntry], query: String) -> [CommandEntry] {
         guard !query.isEmpty else {

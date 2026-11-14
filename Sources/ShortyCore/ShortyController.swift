@@ -11,11 +11,13 @@ public final class ShortyController {
     public var statusHandler: StatusHandler?
     public var clipboardMenuHandler: ((ClipboardMenuKind) -> Void)?
     public var textCommandHandler: (() -> Void)?
+    public var commandBoxSettingsHandler: ((CommandBoxSettings) -> Void)?
     public var windowSwitcherHandler: ((WindowSwitcherUpdate) -> Void)?
     public var permissionRequestHandler: ((ShortyPermissionPane) -> Void)?
     public private(set) var loadedShortcuts: [LoadedShortcut] = []
     public private(set) var loadedSnippetGroups: [SnippetGroup] = []
     public private(set) var loadedBindings: HotKeyBindings = .default
+    public private(set) var loadedCommandBox: CommandBoxSettings = .default
     private var numpadAliases = NumpadAliasResolver(claimedHotKeys: [])
 
     private let console: Console
@@ -94,6 +96,8 @@ public final class ShortyController {
             let previousBindings = loadedBindings
             loadedBindings = configuration.bindings
             numpadAliases = configuration.numpadAliases
+            loadedCommandBox = configuration.commandBox
+            commandBoxSettingsHandler?(loadedCommandBox)
             if didCompleteStart, loadedBindings != previousBindings {
                 applyBindings(changedFrom: previousBindings)
             }

@@ -46,6 +46,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         commandPalettePanel.pickerRequestHandler = { [weak self] kind in
             self?.showCommandInsertionPicker(kind)
         }
+        controller.commandBoxSettingsHandler = { [weak self] settings in
+            DispatchQueue.main.async {
+                self?.commandPalettePanel.settings = settings
+            }
+        }
         commandPalettePanel.actionHandler = { [weak self] action in
             DispatchQueue.main.async {
                 self?.performCommandAction(action)
