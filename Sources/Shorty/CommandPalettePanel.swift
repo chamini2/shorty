@@ -87,6 +87,17 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         handlePanelKeyEvent(event)
     }
 
+    /// Escape clears what you typed first, and only then goes back a level.
+    func boxHandlesEscape() -> Bool {
+        guard !searchField.stringValue.isEmpty else {
+            return false
+        }
+
+        searchField.stringValue = ""
+        updateResults()
+        return true
+    }
+
     func show() {
         // Opens with the last thing you ran, selected, so the same command can
         // be repeated with the hotkey and return alone. Typing replaces it,

@@ -119,8 +119,17 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         }
     }
 
+    /// Escape clears what you typed first, then leaves a folder, then lets
+    /// the box go back a level.
     func boxHandlesEscape() -> Bool {
-        leaveFolderIfNeeded()
+        if !searchField.stringValue.isEmpty {
+            searchField.stringValue = ""
+            query = ""
+            applyFilter(resetSelection: true)
+            return true
+        }
+
+        return leaveFolderIfNeeded()
     }
 
     func show(
