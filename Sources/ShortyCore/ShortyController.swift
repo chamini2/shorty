@@ -325,6 +325,12 @@ public final class ShortyController {
     }
 
     /// Window moves from somewhere other than a hotkey, such as the command box.
+    /// Logged so a command that appears to do nothing can be told apart from
+    /// one that never ran.
+    public func noteCommandBoxAction(_ description: String) {
+        console.info("Command box ran \(description).")
+    }
+
     public func performWindowMove(_ command: WindowMoveCommand) {
         moveFocusedWindow(command, hotKey: "command box")
     }

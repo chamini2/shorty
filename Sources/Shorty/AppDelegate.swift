@@ -244,6 +244,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func performCommandAction(_ action: CommandAction) {
+        controller.noteCommandBoxAction(String(describing: action))
+
         switch action {
         case let .copyText(text):
             let pasteboard = NSPasteboard.general
