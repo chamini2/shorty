@@ -62,6 +62,30 @@ final class CommandCatalogTests: XCTestCase {
         XCTAssertTrue(root("zzzz").isEmpty)
     }
 
+    func testFuzzyQueriesFindTheRightEntry() {
+        XCTAssertEqual(root("sf").first?.title, "Time › San Francisco")
+        XCTAssertEqual(root("clp").first?.title, "Clipboard History")
+        XCTAssertTrue(root("maxi").contains { $0.title == "Window › Maximize" })
+    }
+
+    func testSearchReachesInsideListsAndSaysWhereFrom() {
+        XCTAssertTrue(root("maximize").contains { $0.title == "Window › Maximize" })
+        XCTAssertTrue(root("utc").contains { $0.title == "Time › UTC" })
+    }
+
+    func testMatchingAListShowsTheListNotItsEntries() {
+        let results = root("timezone")
+
+        XCTAssertEqual(results.map(\.title), ["Time"])
+    }
+
+    func testSurfacedEntryKeepsItsOwnBehaviour() throws {
+        let maximize = try XCTUnwrap(root("maximize").first)
+
+        XCTAssertFalse(maximize.navigates)
+        XCTAssertEqual(maximize.action, .moveWindow(.maximize))
+    }
+
     func testTimeGroupHoldsTheZones() throws {
         let time = try XCTUnwrap(root("").first { $0.title == "Time" })
 

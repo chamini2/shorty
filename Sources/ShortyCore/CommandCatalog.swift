@@ -216,15 +216,57 @@ public enum CommandCatalog {
         }
     }
 
-    private static func matching(_ entries: [CommandEntry], query: String) -> [CommandEntry] {
+    /// Searching reaches into lists, so `san francisco` finds the zone without
+    /// opening Time first. A match found inside carries where it came from, so
+    /// the result reads `Time › San Francisco`.
+    private static func matching(
+        _ entries: [CommandEntry],
+        query: String,
+        breadcrumb: String? = nil
+    ) -> [CommandEntry] {
         guard !query.isEmpty else {
             return entries
         }
 
-        let needle = query.lowercased()
+        var results: [(entry: CommandEntry, score: Int)] = []
 
-        return entries.filter { entry in
-            ([entry.title] + entry.keywords).contains { $0.lowercased().contains(needle) }
+        for entry in entries {
+            if let score = FuzzyMatcher.bestScore(query, in: [entry.title] + entry.keywords) {
+                results.append((entry.under(breadcrumb), score))
+                continue
+            }
+
+            // A list that does not match itself may still hold something that
+            // does. A view cannot be searched from here: its contents are not
+            // in the catalog.
+            guard case let .list(children)? = entry.destination else {
+                continue
+            }
+
+            let nested = matching(
+                children,
+                query: query,
+                breadcrumb: breadcrumb.map { "\($0) › \(entry.title)" } ?? entry.title
+            )
+
+            // Found one level down, so rank it below an equally good match at
+            // this level.
+            for child in nested {
+                let score = FuzzyMatcher.bestScore(query, in: [child.title] + child.keywords) ?? 0
+                results.append((child, score - Self.nestedPenalty))
+            }
         }
+
+        // Best match first, and ties keep the order the catalog listed them in.
+        return results
+            .enumerated()
+            .sorted { left, right in
+                left.element.score == right.element.score
+                    ? left.offset < right.offset
+                    : left.element.score > right.element.score
+            }
+            .map(\.element.entry)
     }
+
+    private static let nestedPenalty = 30
 }
