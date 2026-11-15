@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let pathMenuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let shortcutsHeaderItem = NSMenuItem(title: "Shortcuts", action: nil, keyEquivalent: "")
     private let emptyShortcutsItem = NSMenuItem(title: "No shortcuts loaded", action: nil, keyEquivalent: "")
+    private let keepAwakeItem = NSMenuItem(title: "Keep the Mac Awake", action: nil, keyEquivalent: "")
     private var dynamicShortcutItems: [NSMenuItem] = []
     let box = ShortyBoxController()
     private lazy var clipboardPickerPanel = ClipboardPickerPanelController(box: box)
@@ -101,9 +102,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem = statusItem
 
         if let button = statusItem.button {
-            button.title = "S"
             button.toolTip = "Shorty"
+            button.imagePosition = .imageOnly
         }
+
+        updateKeepAwakeIndicator()
 
         stateMenuItem.isEnabled = false
         pathMenuItem.isEnabled = false
@@ -116,6 +119,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(shortcutsHeaderItem)
         menu.addItem(emptyShortcutsItem)
+        menu.addItem(.separator())
+
+        keepAwakeItem.action = #selector(toggleKeepAwake)
+        keepAwakeItem.target = self
+        menu.addItem(keepAwakeItem)
         menu.addItem(.separator())
 
         let windowsItem = NSMenuItem(
@@ -247,8 +255,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         case let .setKeepAwake(active):
             controller.setKeepAwake(active)
+            updateKeepAwakeIndicator()
 
         }
+    }
+
+    @objc
+    private func toggleKeepAwake() {
+        controller.setKeepAwake(!controller.isKeepAwakeActive)
+        updateKeepAwakeIndicator()
+    }
+
+    /// The menu bar cup fills while sleep is held off and empties when it is
+    /// not, which says the same thing as the tick in the menu below it.
+    private func updateKeepAwakeIndicator() {
+        let active = controller.isKeepAwakeActive
+        keepAwakeItem.state = active ? .on : .off
+
+        guard let button = statusItem?.button else {
+            return
+        }
+
+        let image = NSImage(
+            systemSymbolName: active ? "cup.and.saucer.fill" : "cup.and.saucer",
+            accessibilityDescription: active ? "Shorty, keeping the Mac awake" : "Shorty"
+        )
+        image?.isTemplate = true
+        button.image = image
     }
 
     private func showCommandPalette() {
