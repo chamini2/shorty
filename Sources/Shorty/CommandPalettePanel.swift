@@ -87,13 +87,18 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     }
 
     func show() {
-        searchField.stringValue = ""
+        // Opens with the last thing you ran, selected, so the same command can
+        // be repeated with the hotkey and return alone. Typing replaces it,
+        // since the text comes up selected.
+        searchField.stringValue = lastRunQuery
+        selectedEntryIDBeforePush = lastRunEntryID
         selectionRangeAfterRefocus = nil
         updateHeader()
         updateResults()
         resizePanel()
 
         box.open(self)
+        searchField.currentEditor()?.selectAll(nil)
     }
 
 
@@ -247,7 +252,8 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
                 query: query,
                 settings: settings,
                 history: history,
-                keepAwake: keepAwake
+                keepAwake: keepAwake,
+                screenCount: NSScreen.screens.count
             )
         }
 
@@ -310,6 +316,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         if let destination = entry.destination {
             // Coming back should land here, not at the top of the list.
             selectedEntryIDBeforePush = entry.id
+            rememberForNextTime(entry)
             open(destination, from: entry)
             return
         }
@@ -319,6 +326,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             return
         }
 
+        rememberForNextTime(entry)
         hide()
         actionHandler?(action)
     }
@@ -326,6 +334,15 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     /// Remembers what was selected while a child list is open, so coming back
     /// lands on the entry you left from rather than the top of the list.
     private var selectedEntryIDBeforePush: String?
+    /// What was run last, to offer again next time the box opens. Held by the
+    /// root list, which is the one `show()` presents.
+    private var lastRunQuery = ""
+    private var lastRunEntryID: String?
+
+    private func rememberForNextTime(_ entry: CommandEntry) {
+        lastRunQuery = searchField.stringValue
+        lastRunEntryID = entry.id
+    }
 
     private func restoreSelectionAfterReturn() {
         guard let id = selectedEntryIDBeforePush else {
