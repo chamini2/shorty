@@ -6,10 +6,29 @@ public enum WindowMoveCommand: Equatable, Sendable {
     case cycleHalf(WindowMoveDirection)
     case maximize
     case moveToMonitor(WindowMoveDirection)
+    /// Grow or shrink by a share of the display.
+    case resize(CGFloat)
+    /// Put the window back where it was before Shorty first moved it.
+    case restore
+}
+
+/// Accessibility elements are CoreFoundation types: equal and hashable through
+/// CFEqual and CFHash, which is what lets a window be used as a key.
+struct WindowKey: Hashable {
+    let element: AXUIElement
+
+    static func == (lhs: WindowKey, rhs: WindowKey) -> Bool {
+        CFEqual(lhs.element, rhs.element)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(CFHash(element))
+    }
 }
 
 public final class WindowMover {
     private let console: Console
+    private var restorePoints = WindowRestoreStore<WindowKey>()
 
     public init(console: Console) {
         self.console = console
@@ -32,6 +51,19 @@ public final class WindowMover {
             return ActivationResult(succeeded: false, message: message)
         }
 
+        if case .restore = command, restorePoints.count == 0 {
+            let message = "Nothing to restore: no window has been moved yet."
+            console.info(message)
+            return ActivationResult(succeeded: false, message: message)
+        }
+
+        // Nothing to move to, which is not the window refusing anything.
+        if case .moveToMonitor = command, screens.count < 2 {
+            let message = "Only one display, so there is no monitor to move to."
+            console.info(message)
+            return ActivationResult(succeeded: false, message: message)
+        }
+
         var readableWindowCount = 0
         for candidate in candidates {
             guard let currentFrame = frame(of: candidate.window) else {
@@ -41,7 +73,12 @@ public final class WindowMover {
             readableWindowCount += 1
             console.info("Trying window move candidate `\(candidate.source)` at \(Self.describe(currentFrame)).")
 
-            guard let targetFrame = targetFrame(for: command, currentFrame: currentFrame, screens: screens) else {
+            guard let targetFrame = targetFrame(
+                for: command,
+                window: candidate.window,
+                currentFrame: currentFrame,
+                screens: screens
+            ) else {
                 continue
             }
 
@@ -50,15 +87,41 @@ public final class WindowMover {
                 _ = setBool(false, attribute: fullScreenAttribute, on: candidate.window)
             }
 
+            // Taken before the move, and only for the first one, so restore
+            // returns to where the window started rather than to half way
+            // through a sequence of moves.
+            if case .restore = command {
+                restorePoints.forget(WindowKey(element: candidate.window))
+            } else {
+                restorePoints.record(currentFrame, for: WindowKey(element: candidate.window))
+            }
+
             if let appliedFrame = setFrame(targetFrame, on: candidate.window, screens: screens) {
-                // A window that moves but keeps its size has refused the
-                // resize. Saying "moved" there hides the half that failed.
-                guard WindowGeometryPlanner.isApproximately(appliedFrame.size, targetFrame.size) else {
-                    let message = """
-                    \(Self.appName(of: candidate.window)) kept its size \
-                    \(Self.describe(appliedFrame)) instead of \(Self.describe(targetFrame)).
-                    """
-                    console.error(message)
+                let wantedNewSize = !WindowGeometryPlanner.isApproximately(targetFrame.size, currentFrame.size)
+                let sizeHeldStill = WindowGeometryPlanner.isApproximately(appliedFrame.size, currentFrame.size)
+
+                // The app refused to resize. It is judged by whether the size
+                // moved at all, not whether it hit the target: a terminal
+                // snapping to whole character cells has still obeyed.
+                if wantedNewSize, sizeHeldStill {
+                    // Put it back. Resizing and moving are one action, so a
+                    // refused resize should not leave the window somewhere
+                    // else; repeated presses were walking it across the
+                    // screen.
+                    restoreFrame(currentFrame, on: candidate.window)
+                    restorePoints.forget(WindowKey(element: candidate.window))
+
+                    let name = Self.appName(of: candidate.window)
+                    let message: String
+                    if case let .resize(step) = command {
+                        message = step > 0
+                            ? "\(name) will not grow any further."
+                            : "\(name) will not shrink any further."
+                    } else {
+                        message = "\(name) kept its size \(Self.describe(currentFrame.size))."
+                    }
+
+                    console.info(message)
                     return ActivationResult(succeeded: false, message: message)
                 }
 
@@ -76,6 +139,14 @@ public final class WindowMover {
             return ActivationResult(succeeded: false, message: message)
         }
 
+        if case let .resize(step) = command {
+            let message = step > 0
+                ? "Window is already as large as the display."
+                : "Window is already as small as Shorty will make it."
+            console.info(message)
+            return ActivationResult(succeeded: false, message: message)
+        }
+
         let message = "Focused window refused move or resize after trying \(readableWindowCount) candidate(s)."
         console.error(message)
         return ActivationResult(succeeded: false, message: message)
@@ -83,10 +154,17 @@ public final class WindowMover {
 
     private func targetFrame(
         for command: WindowMoveCommand,
+        window: AXUIElement,
         currentFrame: CGRect,
         screens: [CGRect]
     ) -> CGRect? {
         switch command {
+        case .restore:
+            return restorePoints.frame(for: WindowKey(element: window))
+
+        case let .resize(step):
+            return WindowGeometryPlanner.resizedFrame(for: currentFrame, screens: screens, by: step)
+
         case let .cycleHalf(direction):
             return WindowGeometryPlanner.halfCycleFrame(
                 for: currentFrame,
@@ -444,6 +522,19 @@ public final class WindowMover {
         }
 
         return size
+    }
+
+    /// Puts a window back after a change that did not take.
+    private func restoreFrame(_ frame: CGRect, on window: AXUIElement) {
+        withEnhancedUserInterfaceDisabled(for: window) {
+            _ = setPoint(frame.origin, attribute: kAXPositionAttribute as CFString, on: window)
+            _ = setSize(frame.size, attribute: kAXSizeAttribute as CFString, on: window)
+            _ = setPoint(frame.origin, attribute: kAXPositionAttribute as CFString, on: window)
+        }
+    }
+
+    private static func describe(_ size: CGSize) -> String {
+        "width=\(Int(size.width)), height=\(Int(size.height))"
     }
 
     private static func appName(of window: AXUIElement) -> String {

@@ -83,6 +83,7 @@ public enum CommandCatalog {
         history: [ClipboardItem] = [],
         snippetGroups: [SnippetGroup] = [],
         keepAwake: Bool = false,
+        screenCount: Int = 1,
         transformers: [CommandTransformer] = CommandTransformerEngine.defaultTransformers
     ) -> [CommandEntry] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -92,7 +93,8 @@ public enum CommandCatalog {
             settings: settings,
             history: history,
             snippetGroups: snippetGroups,
-            keepAwake: keepAwake
+            keepAwake: keepAwake,
+            screenCount: screenCount
         )
 
         return resultEntries(query: normalizedQuery, now: now, transformers: transformers)
@@ -137,7 +139,8 @@ public enum CommandCatalog {
         settings: CommandBoxSettings,
         history: [ClipboardItem],
         snippetGroups: [SnippetGroup],
-        keepAwake: Bool
+        keepAwake: Bool,
+        screenCount: Int
     ) -> [CommandEntry] {
         [
             CommandEntry(
@@ -165,21 +168,43 @@ public enum CommandCatalog {
                 id: "window",
                 title: "Window",
                 detail: "Move the focused window",
-                destination: .list(windowEntries()),
+                destination: .list(windowEntries(screenCount: screenCount)),
                 keywords: ["layout", "position", "arrange"]
             ),
         ]
     }
 
-    private static func windowEntries() -> [CommandEntry] {
-        [
+    /// Maximize first, as the one most often wanted, then the halves, then
+    /// the monitor moves, and the undo last. The monitor moves are left out
+    /// with a single display, where they can only report that there is
+    /// nowhere to go.
+    private static func windowEntries(screenCount: Int) -> [CommandEntry] {
+        var entries = [
+            windowEntry("maximize", "Maximize", .maximize, ["full", "fill"]),
+            windowEntry("larger", "Make Larger", .resize(sizeStep), ["bigger", "grow", "expand", "wider"]),
+            windowEntry("smaller", "Make Smaller", .resize(-sizeStep), ["shrink", "reduce", "narrower"]),
             windowEntry("left-half", "Left Half", .cycleHalf(.left), ["half", "split"]),
             windowEntry("right-half", "Right Half", .cycleHalf(.right), ["half", "split"]),
-            windowEntry("maximize", "Maximize", .maximize, ["full", "fill"]),
-            windowEntry("left-monitor", "Left Monitor", .moveToMonitor(.left), ["display", "screen", "monitor"]),
-            windowEntry("right-monitor", "Right Monitor", .moveToMonitor(.right), ["display", "screen", "monitor"]),
         ]
+
+        if screenCount > 1 {
+            entries.append(
+                windowEntry("left-monitor", "Left Monitor", .moveToMonitor(.left), ["display", "screen", "monitor"])
+            )
+            entries.append(
+                windowEntry("right-monitor", "Right Monitor", .moveToMonitor(.right), ["display", "screen", "monitor"])
+            )
+        }
+
+        entries.append(
+            windowEntry("restore", "Restore", .restore, ["undo", "revert", "back", "original"])
+        )
+
+        return entries
     }
+
+    /// How much of the display a single larger or smaller step covers.
+    private static let sizeStep: CGFloat = 0.05
 
     private static func windowEntry(
         _ id: String,

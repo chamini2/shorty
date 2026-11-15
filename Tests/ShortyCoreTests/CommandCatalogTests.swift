@@ -30,18 +30,40 @@ final class CommandCatalogTests: XCTestCase {
         )
     }
 
-    func testWindowGroupHoldsTheMoves() throws {
-        let window = try XCTUnwrap(root("").first { $0.title == "Window" })
+    private func windowMoves(screenCount: Int) -> [String] {
+        let entries = CommandCatalog.rootEntries(
+            query: "",
+            now: now,
+            localTimeZone: madrid,
+            screenCount: screenCount
+        )
 
-        guard case let .list(moves) = window.destination else {
-            return XCTFail("Expected Window to lead to a list")
+        guard let window = entries.first(where: { $0.title == "Window" }),
+              case let .list(moves) = window.destination else {
+            return []
         }
 
+        return moves.map(\.title)
+    }
+
+    func testWindowGroupLeadsWithMaximizeAndEndsWithRestore() {
         XCTAssertEqual(
-            CommandCatalog.entries(in: moves, query: "").map(\.title),
-            ["Left Half", "Right Half", "Maximize", "Left Monitor", "Right Monitor"]
+            windowMoves(screenCount: 2),
+            ["Maximize", "Left Half", "Right Half", "Left Monitor", "Right Monitor", "Restore"]
         )
-        XCTAssertEqual(CommandCatalog.entries(in: moves, query: "monitor").count, 2)
+    }
+
+    func testMonitorMovesAreLeftOutWithOneDisplay() {
+        XCTAssertEqual(windowMoves(screenCount: 1), ["Maximize", "Left Half", "Right Half", "Restore"])
+
+        // Nor does searching surface something that could not work.
+        let found = CommandCatalog.rootEntries(
+            query: "monitor",
+            now: now,
+            localTimeZone: madrid,
+            screenCount: 1
+        )
+        XCTAssertFalse(found.contains { $0.title.hasSuffix("Left Monitor") })
     }
 
     func testEmptyQueryShowsNoConversions() {
