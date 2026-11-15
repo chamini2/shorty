@@ -7,7 +7,7 @@
 | 1 | [Global app shortcuts](#1-global-app-shortcuts): bind a hotkey to a specific window, not just an app | configured in YAML |
 | 2 | [Window switcher](#2-window-switcher): switch between windows, not apps | `cmd+tab`, `cmd+tilde/backquote` |
 | 3 | [Clipboard manager + snippets](#3-clipboard-manager--snippets): searchable clipboard history and YAML snippets | `cmd+shift+v`, `cmd+shift+b` |
-| 4 | [Command box](#4-command-box): epoch timestamps, byte units, time zones | `option+space` |
+| 4 | [Command box](#4-command-box): run what Shorty can do, convert what you type | `option+space` |
 
 Every built-in hotkey can be rebound or switched off in [Hotkeys](#hotkeys). A bound key cannot be reused by an app shortcut.
 
@@ -100,7 +100,14 @@ Rectangle-style hotkeys for the focused window:
 | `ctrl+option+cmd+left` | Move to the monitor on the left, keeping proportional position and size (wraps) |
 | `ctrl+option+cmd+right` | Move to the monitor on the right, keeping proportional position and size (wraps) |
 
-Windows stay clear of the menu bar and Dock. Some full-screen, minimized, or non-resizable windows refuse resizing.
+The command box holds these and three more: `Make Larger` and `Make Smaller`,
+which step a window by a twentieth of its display, and `Restore`, which puts it
+back where it was before Shorty first moved it. They work whether or not the
+hotkeys above are bound.
+
+Windows stay clear of the menu bar and Dock. An app that refuses to resize is
+put back where it was, rather than left moved, and Shorty says which app
+refused.
 
 ## 3. Clipboard Manager + Snippets
 
@@ -118,15 +125,21 @@ The picker is a floating panel with a search box. Choosing an item pastes it int
 | `right` | Open folder |
 | `left` / `escape` | Leave folder; `escape` at the top closes the picker |
 | `return` | Paste |
-| `cmd+return` | Paste as plain text (no formatting) |
+| `cmd+return` | Copy to the clipboard without pasting |
+| `option+return` | Paste as plain text (no formatting) |
 | `shift+return` | Trim each line, drop empty lines, join with no separator, save as a new history item, and paste |
+| `cmd+backspace` | Delete the selected history entry |
+| `cmd+v` / `cmd+c` / `cmd+x` / `cmd+a` | Edit the search field |
 
 ### Clipboard History
 
-- Keeps the last 200 items, newest first, without duplicates.
-- Keeps plain text and rich text (RTF, HTML, etc.). Images, files, and URLs are not stored.
+- Keeps the last 200 items, newest first, without duplicates, as one scrollable list.
+- Keeps plain text and rich text (RTF, HTML, etc.).
+- Keeps copied images, up to 10 MB each, beside the history in `ClipboardAssets/`. Pasting writes the image data, not a file path.
+- Keeps copied files as paths rather than copies, so pasting hands over the file itself. An entry whose file has moved says so and is skipped.
+- Records which app a copy came from, by the front window rather than the frontmost app, so an overlay such as a terminal hotkey window is credited correctly.
 - Persists across restarts in `~/Library/Application Support/Shorty/ClipboardHistory.json`.
-- The picker shows the 20 most recent items directly; older ones are in folders of 20 (`21 - 40`, …).
+- The right-hand pane shows the entry in full, with its source, type, size and when it was copied.
 
 ### Snippets
 
@@ -165,14 +178,41 @@ Modifiers also work on click, and `shift` wins over `cmd`, which wins over
 
 ## 4. Command Box
 
-`option+space` opens a command box. Type a command and see the result live. `return` copies the result to the clipboard; `escape` closes.
+`option+space` opens the command box. It lists what Shorty can do, so there is
+nothing to memorise, and converts what you type as you type it.
+
+| Key | Action |
+| --- | --- |
+| type | Filter by name or keyword, reaching inside lists |
+| `up` / `down` | Move selection |
+| `return` | Run the selection, or open it |
+| `right` | Open a list or the picker |
+| `left` / `escape` | Go back one level; `escape` at the top closes |
+
+Entries that take you somewhere carry a `›`:
+
+| Entry | What it holds |
+| --- | --- |
+| `Clipboard History ›` | the picker, with its previews and paste keys |
+| `Time ›` | the current time in each configured zone |
+| `Window ›` | `Maximize`, `Make Larger`, `Make Smaller`, the halves, the monitor moves when a second display is attached, and `Restore` |
+| `Keep the Mac Awake` | holds off idle and display sleep, like `caffeinate` |
+
+Typing a timestamp or a size converts it, above the commands:
 
 | Type | Result |
 | --- | --- |
-| `1700000000` (10 digits) | Epoch seconds as UTC and San Francisco time, plus "2d 3h ago" |
+| `1700000000` (10 digits) | Epoch seconds as UTC and your own zone, plus "2d 3h ago" |
 | `17000000000000` (14 digits) | Epoch milliseconds, same output |
 | `1.5 gb` (units `b`, `bytes`, `kb`, `mb`, `gb`, `tb`) | The size in every other unit (1024-based) |
-| `utc time`, `et time`, `cet time`, `turkey time`, `dubai time`, `korea time`, `japan time` | Current time in that zone |
+
+Searching is fuzzy and reaches into lists, so `sf` finds `Time › San Francisco`
+and `maxi` finds `Window › Maximize` without opening either first. The box
+reopens on whatever you ran last, with the text selected, so the hotkey and
+`return` repeat it.
+
+The box and the clipboard picker share one window: choosing `Clipboard History`
+swaps the contents rather than opening a second panel, and `escape` comes back.
 
 Inside the command box, `cmd+shift+v` / `cmd+shift+b` open the clipboard / snippets picker and insert the chosen text at the cursor.
 
@@ -206,19 +246,7 @@ hotkeys:
 
 Bindings apply on config reload, so no restart is needed.
 
-## Command Box
-
-The command box lists what Shorty can do, so you can browse instead of
-remembering. Arrow keys move, `return` runs the selection, `right` opens a
-group and `left` leaves it. Typing filters by name, and timestamps or sizes you
-type are converted at the top of the list.
-
-Commands that go somewhere carry a `›`: `Clipboard History` opens the picker,
-while `Time` and `Window` open lists of their own. `Window` holds the moves,
-including `Make Larger` and `Make Smaller`, which step a window by a twentieth
-of the display, and `Restore`, which puts it back where it was before Shorty
-first moved it. `Keep the Mac Awake` holds
-off idle and display sleep until you turn it off again, like `caffeinate`.
+## Time Zones
 
 `Time` shows your own zone, named after its city, and UTC. Add more by name, no
 identifiers needed:
@@ -234,6 +262,11 @@ command-box:
 A city name, a zone identifier such as `Asia/Tokyo`, or an abbreviation such as
 `JST` all work, and the name you write becomes the label. A name that does not
 resolve fails the config with suggestions.
+
+Zones are listed in the order written, and each shows its offset as `UTC-8` or
+`UTC+5:30` rather than an abbreviation, since `PST` says nothing about how far
+from UTC it is. A configured list replaces the default pair rather than adding
+to it.
 
 ## Setup
 
@@ -312,4 +345,10 @@ Shorty --help
 
 ### Menu Bar
 
-The menu shows status, config path, and loaded shortcuts, plus `Show Windows`, `Reload Config`, `Reveal Config`, `Open Accessibility Settings`, and `Quit`.
+The icon is a cup, which fills with coffee and steams while `Keep the Mac
+Awake` is on.
+
+The menu shows status, config path, and loaded shortcuts, plus `Keep the Mac
+Awake`, `Show Windows`, `Reload Config`, `Reveal Config`, `Open Accessibility
+Settings`, and `Quit`. Long lines are shortened in the middle so one path
+cannot stretch the menu; hover for the full text.
