@@ -350,8 +350,42 @@ public enum CommandTransformerEngine {
     }
 
     /// Current wall clock in a zone, for the catalog's Time group.
+    ///
+    /// Labelled with the offset rather than an abbreviation: `PST` does not
+    /// say how far from UTC it is, and the system only knows such names for a
+    /// few zones anyway — it answers `GMT+9` for Tokyo. The offset is read at
+    /// the given date, so a zone on daylight saving reads `UTC-7` in summer
+    /// and `UTC-8` in winter.
     public static func currentTime(in timeZone: TimeZone, now: Date = Date()) -> String {
-        format(now, in: timeZone)
+        "\(wallClock(now, in: timeZone)) \(utcOffsetLabel(of: timeZone, at: now))"
+    }
+
+    /// `UTC`, `UTC-8`, `UTC+5:30`.
+    public static func utcOffsetLabel(of timeZone: TimeZone, at date: Date) -> String {
+        let seconds = timeZone.secondsFromGMT(for: date)
+
+        guard seconds != 0 else {
+            return "UTC"
+        }
+
+        let sign = seconds < 0 ? "-" : "+"
+        let minutes = abs(seconds) / 60
+        let remainder = minutes % 60
+
+        guard remainder != 0 else {
+            return "UTC\(sign)\(minutes / 60)"
+        }
+
+        return String(format: "UTC%@%d:%02d", sign, minutes / 60, remainder)
+    }
+
+    private static func wallClock(_ date: Date, in timeZone: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: date)
     }
 
     private static func format(_ date: Date, in timeZone: TimeZone) -> String {

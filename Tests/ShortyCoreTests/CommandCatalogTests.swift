@@ -95,7 +95,7 @@ final class CommandCatalogTests: XCTestCase {
 
         let zones = CommandCatalog.entries(in: entries, query: "")
         XCTAssertEqual(zones.map(\.title).prefix(2).map(String.init), ["Local", "UTC"])
-        XCTAssertEqual(zones.first { $0.title == "UTC" }?.detail, "1970-01-01 00:00:00 GMT")
+        XCTAssertEqual(zones.first { $0.title == "UTC" }?.detail, "1970-01-01 00:00:00 UTC")
         XCTAssertEqual(CommandCatalog.entries(in: entries, query: "japan").count, 1)
     }
 
