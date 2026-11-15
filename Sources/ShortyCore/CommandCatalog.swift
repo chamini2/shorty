@@ -9,6 +9,18 @@ public enum CommandAction: Equatable, Sendable {
     case openClipboard(ClipboardMenuKind)
 }
 
+public extension CommandAction {
+    /// Navigation leaves the box open; anything else has finished the job.
+    var keepsBoxOpen: Bool {
+        switch self {
+        case .openClipboard:
+            return true
+        case .copyText, .moveWindow:
+            return false
+        }
+    }
+}
+
 public struct CommandEntry: Equatable, Identifiable, Sendable {
     public let id: String
     public let title: String

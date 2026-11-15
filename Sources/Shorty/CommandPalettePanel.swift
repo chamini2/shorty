@@ -3,7 +3,7 @@ import Carbon
 import ShortyCore
 
 @MainActor
-final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFieldDelegate {
+final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFieldDelegate {
     private enum Metrics {
         static let panelWidth: CGFloat = 820
         static let panelHeight: CGFloat = 440
@@ -29,8 +29,8 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
     private var entries: [CommandEntry] = []
     private var rowHeights: [CGFloat] = []
     private var selectedIndex = 0
-    /// Groups entered so far, such as Clipboard History then a snippet group.
-    private var groupStack: [CommandEntry] = []
+    /// Set when this list shows a group's children rather than the root.
+    private let group: CommandEntry?
     private var isPresentingNestedPicker = false
     private var pendingInsertionRange: NSRange?
     private var selectionRangeAfterRefocus: NSRange?
@@ -40,8 +40,13 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
     /// Only the entry count is shown; the picker does the browsing.
     var history: [ClipboardItem] = []
 
-    init(box: ShortyBoxController) {
+    convenience init(box: ShortyBoxController) {
+        self.init(box: box, group: nil)
+    }
+
+    init(box: ShortyBoxController, group: CommandEntry?) {
         self.box = box
+        self.group = group
         super.init()
 
         configureContent()
@@ -53,45 +58,37 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
         box.isPresenting(self)
     }
 
+    // MARK: ShortyBoxContent
+
+    var view: NSView {
+        contentView
+    }
+
+    func boxDidPresent(in window: NSWindow) {
+        window.makeFirstResponder(searchField)
+        updateHeader()
+        updateResults()
+    }
+
+    func boxHandlesKey(_ event: NSEvent) -> Bool {
+        handlePanelKeyEvent(event)
+    }
+
     func show() {
         searchField.stringValue = ""
         selectionRangeAfterRefocus = nil
-        groupStack = []
         updateHeader()
         updateResults()
         resizePanel()
 
-        presentInBox()
+        box.open(self)
     }
 
-    /// Takes the box back, keeping whatever was typed and wherever you were.
-    func reshow() {
-        presentInBox()
-    }
 
-    private func presentInBox() {
-        box.present(
-            contentView,
-            owner: self,
-            keyHandler: { [weak self] event in
-                self?.handlePanelKeyEvent(event) ?? false
-            },
-            onResignKey: { [weak self] in
-                guard let self, !isPresentingNestedPicker else {
-                    return
-                }
-
-                hide()
-            },
-            focus: { [searchField] window in
-                window.makeFirstResponder(searchField)
-            }
-        )
-    }
 
     func hide() {
         isPresentingNestedPicker = false
-        box.dismiss(owner: self)
+        box.close()
     }
 
     func insertTextFromPicker(_ text: String) {
@@ -142,10 +139,8 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
             return true
 
         case #selector(NSResponder.cancelOperation(_:)):
-            if !leaveGroupIfNeeded() {
-                hide()
-            }
-            return true
+            // The box handles escape.
+            return false
 
         default:
             return false
@@ -202,7 +197,7 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
     /// The header names what is on screen: Command at the root, or the group
     /// you stepped into, such as Time.
     private func updateHeader() {
-        guard let group = groupStack.last else {
+        guard let group else {
             header.update(title: "Command", symbolName: "command")
             return
         }
@@ -231,8 +226,8 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
     private func updateResults(resetSelection: Bool = true) {
         let query = searchField.stringValue
 
-        if let currentGroup = groupStack.last {
-            entries = CommandCatalog.entries(in: currentGroup, query: query)
+        if let group {
+            entries = CommandCatalog.entries(in: group, query: query)
         } else {
             entries = CommandCatalog.rootEntries(
                 query: query,
@@ -301,38 +296,22 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
             return
         }
 
-        switch action {
-        case .openClipboard:
-            // The picker takes over the same box. Hiding first would order the
-            // window out and straight back in, which reads as a blink.
-            isPresentingNestedPicker = true
-            actionHandler?(action)
-            isPresentingNestedPicker = false
-
-        case .copyText, .moveWindow:
+        if !action.keepsBoxOpen {
             hide()
-            actionHandler?(action)
         }
+
+        actionHandler?(action)
     }
 
+    /// A group opens as its own list on the box's stack, the same way the
+    /// clipboard picker does, so going back is one rule rather than two.
     private func enterGroup(_ group: CommandEntry) {
-        groupStack.append(group)
-        searchField.stringValue = ""
-        updateHeader()
-        updateResults()
-    }
-
-    @discardableResult
-    private func leaveGroupIfNeeded() -> Bool {
-        guard !groupStack.isEmpty else {
-            return false
-        }
-
-        groupStack.removeLast()
-        searchField.stringValue = ""
-        updateHeader()
-        updateResults()
-        return true
+        let list = CommandPalettePanelController(box: box, group: group)
+        list.settings = settings
+        list.history = history
+        list.actionHandler = actionHandler
+        list.pickerRequestHandler = pickerRequestHandler
+        box.push(list)
     }
 
     private func resizePanel() {
@@ -371,10 +350,8 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
 
         switch UInt32(event.keyCode) {
         case UInt32(kVK_Escape):
-            if !leaveGroupIfNeeded() {
-                hide()
-            }
-            return true
+            // The box handles escape.
+            return false
 
         case UInt32(kVK_Return), UInt32(kVK_ANSI_KeypadEnter):
             activateSelection()
@@ -397,7 +374,12 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
             return true
 
         case UInt32(kVK_LeftArrow):
-            return leaveGroupIfNeeded()
+            guard box.depth > 1 else {
+                return false
+            }
+
+            box.pop()
+            return true
 
         default:
             return false
@@ -464,6 +446,7 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
 
         pendingInsertionRange = selectedRange()
         isPresentingNestedPicker = true
+        box.suppressesResignKey = true
         pickerRequestHandler(kind)
     }
 
@@ -505,8 +488,9 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
 
     private func refocusAfterNestedPicker() {
         isPresentingNestedPicker = false
+        box.suppressesResignKey = false
         resizePanel()
-        presentInBox()
+        box.pop()
         if let selectionRangeAfterRefocus {
             setSelectedRange(selectionRangeAfterRefocus)
             self.selectionRangeAfterRefocus = nil

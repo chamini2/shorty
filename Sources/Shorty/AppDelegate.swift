@@ -15,7 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let shortcutsHeaderItem = NSMenuItem(title: "Shortcuts", action: nil, keyEquivalent: "")
     private let emptyShortcutsItem = NSMenuItem(title: "No shortcuts loaded", action: nil, keyEquivalent: "")
     private var dynamicShortcutItems: [NSMenuItem] = []
-    private let box = ShortyBoxController()
+    let box = ShortyBoxController()
     private lazy var clipboardPickerPanel = ClipboardPickerPanelController(box: box)
     private var presentedPickerKind: ClipboardMenuKind?
     private var commandPaletteTargetApplication: NSRunningApplication?
@@ -229,16 +229,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.performWindowMove(command)
 
         case let .openClipboard(kind):
-            // Opens where the command box was, so it reads as the same window
-            // changing content rather than one closing and another appearing.
+            // Pushed onto the box's stack, so escape pops back to the command
+            // list and the window never leaves the screen.
             presentedPickerKind = kind
-            showClipboardPicker(
-                kind,
-                targetApplication: commandPaletteTargetApplication,
-                onReturn: { [weak self] in
-                    self?.commandPalettePanel.reshow()
-                }
-            )
+            showClipboardPicker(kind, targetApplication: commandPaletteTargetApplication, push: true)
         }
     }
 
@@ -396,7 +390,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showClipboardPicker(
         _ kind: ClipboardMenuKind,
         targetApplication capturedTarget: NSRunningApplication? = nil,
-        onReturn: (() -> Void)? = nil
+        push: Bool = false
     ) {
         let mode: ClipboardPickerMode
         switch kind {
@@ -420,9 +414,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             onCancel: {
                 Self.reactivate(targetApplication)
-            },
-            onReturn: onReturn
+            }
         )
+
+        if push {
+            box.push(clipboardPickerPanel)
+        } else {
+            box.open(clipboardPickerPanel)
+        }
     }
 
     private func pastePickerResult(

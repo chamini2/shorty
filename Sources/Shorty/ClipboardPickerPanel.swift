@@ -4,7 +4,7 @@ import ShortyCore
 import UniformTypeIdentifiers
 
 @MainActor
-final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
+final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     private enum Metrics {
         static let panelWidth: CGFloat = 820
         static let listWidth: CGFloat = 320
@@ -64,7 +64,6 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
     private var selectedIndex = -1
     private var onSelect: ((ClipboardPickerResult, ClipboardPickerActivationMode) -> Void)?
     private var onCancel: (() -> Void)?
-    private var onReturn: (() -> Void)?
     private var keyMonitor: Any?
     private var locallyHandledKeyEvent: HandledKeyEvent?
     private var sourceIconCache: [String: NSImage] = [:]
@@ -92,15 +91,43 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         box.isPresenting(self)
     }
 
+    // MARK: ShortyBoxContent
+
+    var view: NSView {
+        contentView
+    }
+
+    func boxDidPresent(in window: NSWindow) {
+        startKeyMonitor()
+        window.makeFirstResponder(searchField)
+    }
+
+    func boxHandlesKey(_ event: NSEvent) -> Bool {
+        handlePanelKeyEvent(event)
+    }
+
+    func boxDidDismiss() {
+        stopKeyMonitor()
+        let handler = onCancel
+        onSelect = nil
+        onCancel = nil
+
+        // Only the outermost dismissal means "nothing was picked".
+        if box.depth == 0 {
+            handler?()
+        }
+    }
+
+    func boxHandlesEscape() -> Bool {
+        leaveFolderIfNeeded()
+    }
+
     func show(
         mode: ClipboardPickerMode,
         history: [ClipboardItem],
         snippetGroups: [SnippetGroup],
         onSelect: @escaping (ClipboardPickerResult, ClipboardPickerActivationMode) -> Void,
-        onCancel: @escaping () -> Void,
-        /// Set when something else opened the picker and wants the box back on
-        /// escape, instead of the box closing.
-        onReturn: (() -> Void)? = nil
+        onCancel: @escaping () -> Void
     ) {
         self.mode = mode
         self.history = history
@@ -108,35 +135,19 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         self.currentFolder = nil
         self.query = ""
         self.onSelect = onSelect
-        self.onReturn = onReturn
         self.onCancel = onCancel
         searchField.stringValue = ""
         updateHeader()
 
-        startKeyMonitor()
         applyFilter(resetSelection: true)
-
-        box.present(
-            contentView,
-            owner: self,
-            keyHandler: { [weak self] event in
-                self?.handlePanelKeyEvent(event) ?? false
-            },
-            onResignKey: { [weak self] in
-                self?.hide()
-            },
-            focus: { [searchField] window in
-                window.makeFirstResponder(searchField)
-            }
-        )
     }
 
     func hide() {
-        onReturn = nil
-        stopKeyMonitor()
-        box.dismiss(owner: self)
-        onSelect = nil
-        onCancel = nil
+        guard box.isPresenting(self) else {
+            return
+        }
+
+        box.close()
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -329,15 +340,8 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
             return true
 
         case #selector(NSResponder.cancelOperation(_:)):
-            if consumeLocallyHandledCurrentEvent() {
-                return true
-            }
-
-            if leaveFolderIfNeeded() {
-                return true
-            }
-            cancel()
-            return true
+            // The box handles escape.
+            return consumeLocallyHandledCurrentEvent()
 
         default:
             return false
@@ -410,11 +414,8 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
 
         switch UInt32(event.keyCode) {
         case UInt32(kVK_Escape):
-            if leaveFolderIfNeeded() {
-                return true
-            }
-            cancel()
-            return true
+            // The box handles escape.
+            return false
 
         case UInt32(kVK_UpArrow):
             moveSelection(by: -1)
@@ -693,7 +694,7 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         }
 
         let handler = onSelect
-        hide()
+        box.close()
         handler?(result, activationMode)
     }
 
@@ -711,22 +712,6 @@ final class ClipboardPickerPanelController: NSObject, NSWindowDelegate, NSTableV
         return true
     }
 
-    private func cancel() {
-        // Hand the box straight back: dismissing first would order the window
-        // out and in again.
-        if let onReturn {
-            stopKeyMonitor()
-            onSelect = nil
-            onCancel = nil
-            self.onReturn = nil
-            onReturn()
-            return
-        }
-
-        let handler = onCancel
-        hide()
-        handler?()
-    }
 
     private func firstSelectableIndex() -> Int? {
         entries.indices.first { entries[$0].isSelectable }

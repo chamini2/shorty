@@ -1,8 +1,34 @@
 import AppKit
+import Carbon
 
-/// The window both the command box and the clipboard picker live in. Keeping
-/// one window means moving between them swaps the contents rather than closing
-/// one panel and opening another, so the box never blinks out of existence.
+/// Anything the box can show: the command list, a list of times, the clipboard
+/// picker. Each supplies a view and handles its own keys; the box handles the
+/// window and the navigation between them.
+@MainActor
+protocol ShortyBoxContent: AnyObject {
+    var view: NSView { get }
+
+    /// Called before the content is shown, so it can refresh and focus.
+    func boxWillPresent()
+    func boxDidPresent(in window: NSWindow)
+    /// Return true when the key was handled.
+    func boxHandlesKey(_ event: NSEvent) -> Bool
+    /// Return true to deal with escape internally, such as leaving a folder,
+    /// instead of the box going back a level.
+    func boxHandlesEscape() -> Bool
+    /// Called when the box closes or this content is popped off the stack.
+    func boxDidDismiss()
+}
+
+extension ShortyBoxContent {
+    func boxWillPresent() {}
+    func boxDidDismiss() {}
+    func boxHandlesEscape() -> Bool { false }
+}
+
+/// The window the command box and the clipboard picker live in, and the stack
+/// of what is showing. One window and one stack means one rule for going back:
+/// escape pops, and the box closes when the last content pops.
 @MainActor
 final class ShortyBoxController: NSObject, NSWindowDelegate {
     enum Metrics {
@@ -13,14 +39,9 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         static let bottomMargin: CGFloat = 20
     }
 
-    /// What the box is showing, so a controller can tell whether it still owns
-    /// the window before acting on it.
-    private(set) var currentContentID: ObjectIdentifier?
-
     private let panel: ShortyBoxPanel
     private let container = NSView()
-    private var keyHandler: ((NSEvent) -> Bool)?
-    private var resignKeyHandler: (() -> Void)?
+    private var stack: [ShortyBoxContent] = []
 
     override init() {
         panel = ShortyBoxPanel(
@@ -42,34 +63,77 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         panel
     }
 
-    func isPresenting(_ owner: AnyObject) -> Bool {
-        panel.isVisible && currentContentID == ObjectIdentifier(owner)
+    var depth: Int {
+        stack.count
     }
 
-    /// Installs a content view. The window itself stays where it is, which is
-    /// what makes the swap look like one box changing its mind.
-    func present(
-        _ content: NSView,
-        owner: AnyObject,
-        keyHandler: @escaping (NSEvent) -> Bool,
-        onResignKey: @escaping () -> Void,
-        focus: (NSWindow) -> Void
-    ) {
-        let wasVisible = panel.isVisible
+    func isPresenting(_ content: ShortyBoxContent) -> Bool {
+        panel.isVisible && stack.last === content
+    }
 
-        self.keyHandler = keyHandler
-        resignKeyHandler = onResignKey
-        currentContentID = ObjectIdentifier(owner)
+    /// Shows `content` as the only thing on the stack, opening the box.
+    func open(_ content: ShortyBoxContent) {
+        stack.forEach { $0.boxDidDismiss() }
+        stack = []
+        push(content)
+    }
+
+    /// Shows `content` above what is already there, keeping the window as is.
+    func push(_ content: ShortyBoxContent) {
+        stack.append(content)
+        install(content)
+    }
+
+    /// Goes back one level, closing the box when nothing is left.
+    @discardableResult
+    func pop() -> Bool {
+        guard !stack.isEmpty else {
+            return false
+        }
+
+        stack.removeLast().boxDidDismiss()
+
+        guard let previous = stack.last else {
+            close()
+            return false
+        }
+
+        install(previous)
+        return true
+    }
+
+    func close() {
+        stack.forEach { $0.boxDidDismiss() }
+        stack = []
+        panel.orderOut(nil)
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        guard panel.isVisible, !suppressesResignKey else {
+            return
+        }
+
+        close()
+    }
+
+    /// Set while something else deliberately takes focus, such as a nested
+    /// picker, so the box does not close under it.
+    var suppressesResignKey = false
+
+    private func install(_ content: ShortyBoxContent) {
+        let wasVisible = panel.isVisible
+        content.boxWillPresent()
 
         container.subviews.forEach { $0.removeFromSuperview() }
-        content.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(content)
+        let view = content.view
+        view.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(view)
 
         NSLayoutConstraint.activate([
-            content.topAnchor.constraint(equalTo: container.topAnchor),
-            content.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            content.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            view.topAnchor.constraint(equalTo: container.topAnchor),
+            view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
         panel.setContentSize(NSSize(width: Metrics.width, height: Metrics.height))
@@ -82,26 +146,7 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
             panel.makeKeyAndOrderFront(nil)
         }
 
-        focus(panel)
-    }
-
-    func dismiss(owner: AnyObject) {
-        guard currentContentID == ObjectIdentifier(owner) else {
-            return
-        }
-
-        currentContentID = nil
-        keyHandler = nil
-        resignKeyHandler = nil
-        panel.orderOut(nil)
-    }
-
-    func windowDidResignKey(_ notification: Notification) {
-        guard panel.isVisible else {
-            return
-        }
-
-        resignKeyHandler?()
+        content.boxDidPresent(in: panel)
     }
 
     private func configurePanel() {
@@ -114,8 +159,23 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         panel.hidesOnDeactivate = false
         panel.appearance = NSAppearance(named: .darkAqua)
         panel.delegate = self
+        // Escape is the box's: handling it in each content let one keystroke
+        // pop twice, which closed the window instead of going back a level.
         panel.keyEventHandler = { [weak self] event in
-            self?.keyHandler?(event) ?? false
+            guard let self else {
+                return false
+            }
+
+            if event.type == .keyDown, event.keyCode == UInt16(kVK_Escape) {
+                if stack.last?.boxHandlesEscape() == true {
+                    return true
+                }
+
+                pop()
+                return true
+            }
+
+            return stack.last?.boxHandlesKey(event) ?? false
         }
 
         container.wantsLayer = true
