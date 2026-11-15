@@ -51,6 +51,17 @@ public final class WindowMover {
             }
 
             if let appliedFrame = setFrame(targetFrame, on: candidate.window, screens: screens) {
+                // A window that moves but keeps its size has refused the
+                // resize. Saying "moved" there hides the half that failed.
+                guard WindowGeometryPlanner.isApproximately(appliedFrame.size, targetFrame.size) else {
+                    let message = """
+                    \(Self.appName(of: candidate.window)) kept its size \
+                    \(Self.describe(appliedFrame)) instead of \(Self.describe(targetFrame)).
+                    """
+                    console.error(message)
+                    return ActivationResult(succeeded: false, message: message)
+                }
+
                 let message = "Moved focused window to \(Self.describe(appliedFrame))."
                 console.info(message)
                 return ActivationResult(succeeded: true, message: message)
@@ -303,10 +314,12 @@ public final class WindowMover {
     private func setFrame(_ targetFrame: CGRect, on window: AXUIElement, screens: [CGRect]) -> CGRect? {
         let originalFrame = frame(of: window)
 
-        _ = setSize(targetFrame.size, attribute: kAXSizeAttribute as CFString, on: window)
-        _ = setPoint(targetFrame.origin, attribute: kAXPositionAttribute as CFString, on: window)
-        _ = setSize(targetFrame.size, attribute: kAXSizeAttribute as CFString, on: window)
-        _ = setPoint(targetFrame.origin, attribute: kAXPositionAttribute as CFString, on: window)
+        withEnhancedUserInterfaceDisabled(for: window) {
+            _ = setSize(targetFrame.size, attribute: kAXSizeAttribute as CFString, on: window)
+            _ = setPoint(targetFrame.origin, attribute: kAXPositionAttribute as CFString, on: window)
+            _ = setSize(targetFrame.size, attribute: kAXSizeAttribute as CFString, on: window)
+            _ = setPoint(targetFrame.origin, attribute: kAXPositionAttribute as CFString, on: window)
+        }
 
         guard let firstAppliedFrame = frame(of: window) else {
             return nil
@@ -431,6 +444,49 @@ public final class WindowMover {
         }
 
         return size
+    }
+
+    private static func appName(of window: AXUIElement) -> String {
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(window, &pid) == .success else {
+            return "The window"
+        }
+
+        return NSRunningApplication(processIdentifier: pid)?.localizedName ?? "pid \(pid)"
+    }
+
+    /// Chrome and other Electron style apps turn on `AXEnhancedUserInterface`
+    /// as soon as an accessibility client attaches, and with it on they
+    /// animate a programmatic resize and then put the window back where it
+    /// was. Turning it off around the change makes the resize stick; it is
+    /// restored afterwards so the app keeps whatever behaviour it wanted.
+    private func withEnhancedUserInterfaceDisabled(for window: AXUIElement, _ body: () -> Void) {
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(window, &pid) == .success else {
+            body()
+            return
+        }
+
+        let application = AXUIElementCreateApplication(pid)
+        let attribute = "AXEnhancedUserInterface" as CFString
+
+        guard boolAttribute(attribute, on: application) == true else {
+            body()
+            return
+        }
+
+        _ = setBool(false, attribute: attribute, on: application)
+        body()
+        _ = setBool(true, attribute: attribute, on: application)
+    }
+
+    private func stringAttribute(_ attribute: CFString, on element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else {
+            return nil
+        }
+
+        return value as? String
     }
 
     private func setPoint(_ point: CGPoint, attribute: CFString, on element: AXUIElement) -> Bool {

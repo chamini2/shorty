@@ -145,6 +145,15 @@ public enum WindowGeometryPlanner {
     }
 
     public static func isApproximately(
+        _ size: CGSize,
+        _ target: CGSize,
+        tolerance: CGFloat = defaultTolerance
+    ) -> Bool {
+        abs(size.width - target.width) <= tolerance &&
+            abs(size.height - target.height) <= tolerance
+    }
+
+    public static func isApproximately(
         _ point: CGPoint,
         _ target: CGPoint,
         tolerance: CGFloat = defaultTolerance

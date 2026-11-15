@@ -3,6 +3,16 @@ import XCTest
 @testable import ShortyCore
 
 final class WindowGeometryPlannerTests: XCTestCase {
+    func testSizeComparisonToleratesSmallDifferences() {
+        let target = CGSize(width: 2056, height: 1290)
+
+        XCTAssertTrue(WindowGeometryPlanner.isApproximately(CGSize(width: 2056, height: 1290), target))
+        XCTAssertTrue(WindowGeometryPlanner.isApproximately(CGSize(width: 2055, height: 1291), target))
+
+        // A window that kept its own size is not approximately the target.
+        XCTAssertFalse(WindowGeometryPlanner.isApproximately(CGSize(width: 1728, height: 1071), target))
+    }
+
     func testHalfFramesUseVisibleScreenHalves() {
         let screen = CGRect(x: 100, y: 50, width: 1000, height: 800)
 
