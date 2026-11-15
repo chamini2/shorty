@@ -153,6 +153,12 @@ public final class ShortyController {
         clipboardPaster.pasteText(text)
     }
 
+    @discardableResult
+    public func deleteClipboardItem(_ item: ClipboardItem) -> Bool {
+        console.info("Removing clipboard history item.")
+        return clipboardHistoryStore.remove(id: item.id)
+    }
+
     public func copyClipboardItem(_ item: ClipboardItem) {
         console.info("Copying clipboard history item without pasting.")
         clipboardHistoryStore.add(item)

@@ -582,6 +582,23 @@ public final class ClipboardHistoryStore {
         save()
     }
 
+    /// Forgets one entry, and the image it pointed at when nothing else uses
+    /// it. Returns false when the entry had already gone.
+    @discardableResult
+    public func remove(id: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let index = items.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+
+        items.remove(at: index)
+        assetStore.removeOrphans(keeping: items.compactMap(\.image))
+        save()
+        return true
+    }
+
     public func addPlainText(_ text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return

@@ -432,6 +432,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             onCancel: {
                 Self.reactivate(targetApplication)
+            },
+            onDelete: { [weak self] item in
+                self?.controller.deleteClipboardItem(item)
             }
         )
     }

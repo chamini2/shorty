@@ -101,6 +101,40 @@ final class ClipboardAssetTests: XCTestCase {
         XCTAssertNil(store.data(for: first))
     }
 
+    func testRemoveForgetsTheEntryAndItsPicture() throws {
+        let history = ClipboardHistoryStore(
+            url: directory.appendingPathComponent("History.json"),
+            maxStoredItems: 10,
+            assetStore: store
+        )
+        let asset = try XCTUnwrap(
+            store.store(data: try pngData(width: 4, height: 2), type: "public.png", pixelWidth: 4, pixelHeight: 2)
+        )
+        let picture = ClipboardItem(plainText: "", image: asset)
+        let text = ClipboardItem(plainText: "kept")
+
+        history.add(text)
+        history.add(picture)
+
+        XCTAssertTrue(history.remove(id: picture.id))
+        XCTAssertEqual(history.recentItems().map(\.plainText), ["kept"])
+        XCTAssertNil(store.data(for: asset), "the picture goes with the entry")
+        XCTAssertFalse(history.remove(id: picture.id), "nothing left to remove")
+    }
+
+    func testRemovalIsWrittenToDisk() throws {
+        let url = directory.appendingPathComponent("History.json")
+        let history = ClipboardHistoryStore(url: url, maxStoredItems: 10, assetStore: store)
+        let item = ClipboardItem(plainText: "gone")
+
+        history.add(item)
+        history.add(ClipboardItem(plainText: "kept"))
+        history.remove(id: item.id)
+
+        let reopened = ClipboardHistoryStore(url: url, maxStoredItems: 10, assetStore: store)
+        XCTAssertEqual(reopened.recentItems().map(\.plainText), ["kept"])
+    }
+
     func testImageItemsWithDifferentPicturesGetDifferentIDs() throws {
         let first = try XCTUnwrap(
             store.store(data: try pngData(width: 4, height: 2), type: "public.png", pixelWidth: 4, pixelHeight: 2)

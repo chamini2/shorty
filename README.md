@@ -153,6 +153,7 @@ newest history entry, so snippets are one `up` away and never in the way.
 | `cmd+return` | Copy to the clipboard without pasting |
 | `option+return` | Paste as plain text |
 | `shift+return` | Paste with blank lines dropped and lines joined |
+| `cmd+backspace` | Delete the selected history entry |
 | `cmd+v` / `cmd+c` / `cmd+x` / `cmd+a` | Edit the search field |
 
 Modifiers also work on click, and `shift` wins over `cmd`, which wins over

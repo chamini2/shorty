@@ -64,6 +64,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     private var selectedIndex = -1
     private var onSelect: ((ClipboardPickerResult, ClipboardPickerActivationMode) -> Void)?
     private var onCancel: (() -> Void)?
+    private var onDelete: ((ClipboardItem) -> Void)?
     private var keyMonitor: Any?
     private var locallyHandledKeyEvent: HandledKeyEvent?
     private var sourceIconCache: [String: NSImage] = [:]
@@ -127,7 +128,8 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         history: [ClipboardItem],
         snippetGroups: [SnippetGroup],
         onSelect: @escaping (ClipboardPickerResult, ClipboardPickerActivationMode) -> Void,
-        onCancel: @escaping () -> Void
+        onCancel: @escaping () -> Void,
+        onDelete: ((ClipboardItem) -> Void)? = nil
     ) {
         self.mode = mode
         self.history = history
@@ -135,6 +137,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         self.currentFolder = nil
         self.query = ""
         self.onSelect = onSelect
+        self.onDelete = onDelete
         self.onCancel = onCancel
         searchField.stringValue = ""
         updateHeader()
@@ -432,6 +435,10 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
             return enterSelectedFolderIfNeeded()
 
         case UInt32(kVK_Delete), UInt32(kVK_ForwardDelete):
+            if event.modifierFlags.contains(.command) {
+                return deleteSelectedHistoryItem()
+            }
+
             if !query.isEmpty {
                 return false
             }
@@ -668,6 +675,31 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         searchField.stringValue = ""
         updateHeader()
         applyFilter(resetSelection: true)
+        return true
+    }
+
+    /// Removes the selected entry from history, keeping the selection where
+    /// it was so a run of deletes does not jump about. Snippets come from the
+    /// config, so they are not ours to delete.
+    private func deleteSelectedHistoryItem() -> Bool {
+        guard entries.indices.contains(selectedIndex),
+              case let .history(item) = entries[selectedIndex] else {
+            NSSound.beep()
+            return true
+        }
+
+        onDelete?(item)
+        history.removeAll { $0.id == item.id }
+
+        let previousIndex = selectedIndex
+        applyFilter(resetSelection: true)
+        selectedIndex = min(previousIndex, entries.indices.last ?? 0)
+
+        if entries.indices.contains(selectedIndex), !entries[selectedIndex].isSelectable {
+            selectedIndex = firstSelectableIndex() ?? -1
+        }
+
+        selectCurrentRow()
         return true
     }
 
