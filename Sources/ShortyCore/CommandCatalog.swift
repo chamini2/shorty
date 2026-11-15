@@ -51,6 +51,12 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
     public var isGroup: Bool {
         !children.isEmpty
     }
+
+    /// Whether picking this takes you somewhere rather than finishing a job.
+    /// Both a group and an action that keeps the box open earn the chevron.
+    public var navigates: Bool {
+        isGroup || action?.keepsBoxOpen == true
+    }
 }
 
 /// Everything the command box can offer: live conversions of what you typed,

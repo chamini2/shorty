@@ -52,6 +52,14 @@ final class CommandCatalogTests: XCTestCase {
         XCTAssertEqual(CommandCatalog.entries(in: time, query: "japan").count, 1)
     }
 
+    func testChevronMarksAnythingThatNavigates() throws {
+        let entries = root("")
+
+        XCTAssertTrue(try XCTUnwrap(entries.first { $0.title == "Time" }).navigates)
+        XCTAssertTrue(try XCTUnwrap(entries.first { $0.title == "Clipboard History" }).navigates)
+        XCTAssertFalse(try XCTUnwrap(entries.first { $0.title == "Maximize Window" }).navigates)
+    }
+
     func testZonesAreNoLongerTopLevelCommands() {
         XCTAssertFalse(root("utc time").contains { $0.title == "UTC Time" })
     }

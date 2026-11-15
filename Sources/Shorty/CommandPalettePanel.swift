@@ -530,7 +530,7 @@ private final class CommandPaletteEntryRowView: NSView {
             ? NSColor(calibratedWhite: 1, alpha: 0.12).cgColor
             : NSColor.clear.cgColor
 
-        let titleField = NSTextField(labelWithString: entry.isGroup ? "\(entry.title) ›" : entry.title)
+        let titleField = NSTextField(labelWithString: entry.navigates ? "\(entry.title) ›" : entry.title)
         titleField.font = Self.titleFont
         titleField.textColor = isSelected ? .labelColor : .secondaryLabelColor
         titleField.lineBreakMode = .byTruncatingTail
