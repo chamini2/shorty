@@ -268,8 +268,14 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             view.removeFromSuperview()
         }
 
+        let detailColumnWidth = CommandPaletteEntryRowView.detailColumnWidth(for: entries)
+
         for (index, pair) in zip(entries, rowHeights).enumerated() {
-            let row = CommandPaletteEntryRowView(entry: pair.0, isSelected: index == selectedIndex)
+            let row = CommandPaletteEntryRowView(
+                entry: pair.0,
+                isSelected: index == selectedIndex,
+                detailColumnWidth: detailColumnWidth
+            )
             row.translatesAutoresizingMaskIntoConstraints = false
             stackView.addArrangedSubview(row)
             NSLayoutConstraint.activate([
@@ -582,7 +588,21 @@ private final class CommandPaletteEntryRowView: NSView {
         static let cornerRadius: CGFloat = 6
     }
 
-    init(entry: CommandEntry, isSelected: Bool) {
+    /// Widest single-line detail in the list, so every row reserves the same
+    /// column and the parts that vary, such as a UTC offset, line up.
+    static func detailColumnWidth(for entries: [CommandEntry]) -> CGFloat {
+        let widths = entries.compactMap { entry -> CGFloat? in
+            guard let detail = entry.detail, !detail.isEmpty, !isMultiline(detail) else {
+                return nil
+            }
+
+            return (detail as NSString).size(withAttributes: [.font: detailFont]).width
+        }
+
+        return widths.max() ?? 0
+    }
+
+    init(entry: CommandEntry, isSelected: Bool, detailColumnWidth: CGFloat = 0) {
         super.init(frame: .zero)
 
         wantsLayer = true
@@ -618,13 +638,17 @@ private final class CommandPaletteEntryRowView: NSView {
         // One-line details sit beside the title, which keeps lists such as the
         // time zones compact. Only multi-line results need their own block.
         guard Self.isMultiline(detail) else {
-            detailField.alignment = .right
+            // Left aligned inside a fixed column: right aligning each label
+            // separately is what left the clocks ragged, since the offset
+            // after them differs in width.
+            detailField.alignment = .left
             detailField.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
             NSLayoutConstraint.activate([
                 titleField.centerYAnchor.constraint(equalTo: centerYAnchor),
                 detailField.centerYAnchor.constraint(equalTo: centerYAnchor),
                 detailField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
+                detailField.widthAnchor.constraint(equalToConstant: ceil(detailColumnWidth)),
                 detailField.leadingAnchor.constraint(
                     greaterThanOrEqualTo: titleField.trailingAnchor,
                     constant: Metrics.detailSpacing
