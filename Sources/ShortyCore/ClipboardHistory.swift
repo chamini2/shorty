@@ -839,7 +839,7 @@ private extension NSPasteboard.PasteboardType {
     }
 }
 
-private extension String {
+extension String {
     func shortyTruncated(maxLength: Int, symbol: String = "...") -> String {
         guard maxLength > symbol.count, count > maxLength else {
             return self

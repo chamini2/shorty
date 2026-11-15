@@ -69,13 +69,13 @@ public enum ClipboardItemDetailBuilder {
             )
 
         case let .folder(folder):
-            let itemCount = folder.entries.filter { $0.pasteResult != nil }.count
+            let items = folder.entries.filter { $0.pasteResult != nil }
             return ClipboardItemDetail(
-                body: "",
+                body: folderListing(of: items),
                 kind: .folder,
                 rows: [
                     ClipboardDetailRow(label: "Type", value: ClipboardItemKind.folder.rawValue),
-                    ClipboardDetailRow(label: "Items", value: "\(itemCount)"),
+                    ClipboardDetailRow(label: "Items", value: "\(items.count)"),
                 ]
             )
 
@@ -132,6 +132,50 @@ public enum ClipboardItemDetailBuilder {
             rows: rows
         )
     }
+
+    /// What a folder holds, so selecting one previews its contents rather than
+    /// only counting them. Each line pairs the name with the start of its text.
+    private static func folderListing(of entries: [ClipboardPickerEntry]) -> String {
+        entries
+            .prefix(maxFolderPreviewItems)
+            .map { entry in
+                let title = entry.title
+                guard let preview = firstLine(of: entry), preview != title else {
+                    return title
+                }
+
+                return "\(title)  —  \(preview)"
+            }
+            .joined(separator: "\n")
+    }
+
+    private static func firstLine(of entry: ClipboardPickerEntry) -> String? {
+        let text: String
+
+        switch entry.pasteResult {
+        case let .snippet(_, snippet):
+            text = snippet.content
+        case let .history(item):
+            text = item.previewText
+        case .none:
+            return nil
+        }
+
+        let line = text
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespaces) ?? ""
+
+        guard !line.isEmpty else {
+            return nil
+        }
+
+        return line.shortyTruncated(maxLength: maxFolderPreviewLineLength)
+    }
+
+    private static let maxFolderPreviewItems = 30
+    private static let maxFolderPreviewLineLength = 80
 
     public static func byteLabel(_ bytes: Int) -> String {
         let formatter = ByteCountFormatter()

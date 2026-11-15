@@ -90,6 +90,42 @@ final class ClipboardItemDetailTests: XCTestCase {
         )
     }
 
+    func testFolderDetailListsWhatIsInside() throws {
+        let folder = ClipboardPickerFolder(
+            id: "snippets:Work",
+            title: "Work",
+            kind: .snippets,
+            entries: [
+                .header("Work"),
+                .snippet(groupTitle: "Work", snippet: Snippet(title: "Greeting", content: "Hello from Shorty.")),
+                .snippet(groupTitle: "Work", snippet: Snippet(title: "Multi", content: "first line\nsecond line")),
+                .snippet(groupTitle: "Work", snippet: Snippet(title: "Same", content: "Same")),
+            ]
+        )
+
+        let detail = try XCTUnwrap(ClipboardItemDetailBuilder.detail(for: .folder(folder)))
+
+        XCTAssertEqual(
+            detail.body,
+            """
+            Greeting  —  Hello from Shorty.
+            Multi  —  first line
+            Same
+            """
+        )
+    }
+
+    func testEmptyFolderHasNoListing() throws {
+        let folder = ClipboardPickerFolder(
+            id: "snippets:Empty",
+            title: "Empty",
+            kind: .snippets,
+            entries: [.header("Empty")]
+        )
+
+        XCTAssertEqual(ClipboardItemDetailBuilder.detail(for: .folder(folder))?.body, "")
+    }
+
     func testFolderDetailCountsPasteableEntries() {
         let folder = ClipboardPickerFolder(
             id: "snippets:Work",
