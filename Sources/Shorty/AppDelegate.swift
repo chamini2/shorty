@@ -245,6 +245,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let .moveWindow(command):
             controller.performWindowMove(command)
 
+        case let .setKeepAwake(active):
+            controller.setKeepAwake(active)
+
         }
     }
 
@@ -258,6 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Captured before the box takes focus, so a paste lands where it was.
         commandPaletteTargetApplication = Self.currentPasteTargetApplication()
         commandPalettePanel.history = controller.recentClipboardItems()
+        commandPalettePanel.keepAwake = controller.isKeepAwakeActive
         commandPalettePanel.show()
     }
 

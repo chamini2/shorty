@@ -210,7 +210,8 @@ group and `left` leaves it. Typing filters by name, and timestamps or sizes you
 type are converted at the top of the list.
 
 Commands that go somewhere carry a `›`: `Clipboard History` opens the picker,
-while `Time` and `Window` open lists of their own.
+while `Time` and `Window` open lists of their own. `Keep the Mac Awake` holds
+off idle and display sleep until you turn it off again, like `caffeinate`.
 
 `Time` shows your own zone, named after its city, and UTC. Add more by name, no
 identifiers needed:

@@ -28,6 +28,7 @@ public final class ShortyController {
     private let clipboardMonitor: ClipboardMonitor
     private let clipboardPaster: ClipboardPaster
     private let windowSwitchingIndex: WindowSwitchingIndex
+    private let keepAwake = KeepAwake()
     private lazy var windowSwitcherEventTap = WindowSwitcherEventTap { [weak self] event in
         self?.handleWindowSwitcherEvent(event)
     }
@@ -77,6 +78,7 @@ public final class ShortyController {
     }
 
     public func stop() {
+        keepAwake.stop()
         configWatcher?.stop()
         clipboardMonitor.stop()
         windowSwitchingIndex.stop()
@@ -157,6 +159,17 @@ public final class ShortyController {
     public func deleteClipboardItem(_ item: ClipboardItem) -> Bool {
         console.info("Removing clipboard history item.")
         return clipboardHistoryStore.remove(id: item.id)
+    }
+
+    public var isKeepAwakeActive: Bool {
+        keepAwake.isActive
+    }
+
+    public func setKeepAwake(_ active: Bool) {
+        keepAwake.set(active)
+        let message = active ? "Keeping the Mac awake." : "Letting the Mac sleep again."
+        console.info(message)
+        publishStatus(message)
     }
 
     public func copyClipboardItem(_ item: ClipboardItem) {

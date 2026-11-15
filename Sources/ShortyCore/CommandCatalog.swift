@@ -6,6 +6,8 @@ public enum CommandAction: Equatable, Sendable {
     /// Put text on the pasteboard, such as a converted timestamp.
     case copyText(String)
     case moveWindow(WindowMoveCommand)
+    /// Stop the machine sleeping, or let it again.
+    case setKeepAwake(Bool)
 }
 
 /// Where an entry leads. A plain list of entries covers most of it; a view is
@@ -80,6 +82,7 @@ public enum CommandCatalog {
         settings: CommandBoxSettings = .default,
         history: [ClipboardItem] = [],
         snippetGroups: [SnippetGroup] = [],
+        keepAwake: Bool = false,
         transformers: [CommandTransformer] = CommandTransformerEngine.defaultTransformers
     ) -> [CommandEntry] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -88,7 +91,8 @@ public enum CommandCatalog {
             localTimeZone: localTimeZone,
             settings: settings,
             history: history,
-            snippetGroups: snippetGroups
+            snippetGroups: snippetGroups,
+            keepAwake: keepAwake
         )
 
         return resultEntries(query: normalizedQuery, now: now, transformers: transformers)
@@ -132,7 +136,8 @@ public enum CommandCatalog {
         localTimeZone: TimeZone,
         settings: CommandBoxSettings,
         history: [ClipboardItem],
-        snippetGroups: [SnippetGroup]
+        snippetGroups: [SnippetGroup],
+        keepAwake: Bool
     ) -> [CommandEntry] {
         [
             CommandEntry(
@@ -148,6 +153,13 @@ public enum CommandCatalog {
                 detail: "Current time around the world",
                 destination: .list(timeEntries(now: now, localTimeZone: localTimeZone, settings: settings)),
                 keywords: ["clock", "timezone", "zone"]
+            ),
+            CommandEntry(
+                id: "keep-awake",
+                title: keepAwake ? "Let the Mac Sleep" : "Keep the Mac Awake",
+                detail: keepAwake ? "On, sleep is held off" : "Off",
+                action: .setKeepAwake(!keepAwake),
+                keywords: ["caffeine", "caffeinate", "sleep", "awake", "insomnia", "screensaver"]
             ),
             CommandEntry(
                 id: "window",

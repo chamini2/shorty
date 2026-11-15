@@ -43,6 +43,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     var settings: CommandBoxSettings = .default
     /// Only the entry count is shown; the picker does the browsing.
     var history: [ClipboardItem] = []
+    var keepAwake = false
 
     convenience init(box: ShortyBoxController) {
         self.init(box: box, listEntries: nil, title: nil, symbolName: nil)
@@ -246,7 +247,8 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             entries = CommandCatalog.rootEntries(
                 query: query,
                 settings: settings,
-                history: history
+                history: history,
+                keepAwake: keepAwake
             )
         }
 
