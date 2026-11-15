@@ -53,6 +53,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.commandPalettePanel.settings = settings
             }
         }
+        commandPalettePanel.viewProvider = { [weak self] kind in
+            guard let self else {
+                return nil
+            }
+
+            switch kind {
+            case let .clipboard(menuKind):
+                // Prepared but not presented: the box pushes it, which keeps
+                // escape popping back to the command list.
+                presentedPickerKind = menuKind
+                prepareClipboardPicker(
+                    menuKind,
+                    targetApplication: commandPaletteTargetApplication
+                )
+                return clipboardPickerPanel
+            }
+        }
         commandPalettePanel.actionHandler = { [weak self] action in
             DispatchQueue.main.async {
                 self?.performCommandAction(action)
@@ -228,11 +245,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let .moveWindow(command):
             controller.performWindowMove(command)
 
-        case let .openClipboard(kind):
-            // Pushed onto the box's stack, so escape pops back to the command
-            // list and the window never leaves the screen.
-            presentedPickerKind = kind
-            showClipboardPicker(kind, targetApplication: commandPaletteTargetApplication, push: true)
         }
     }
 
@@ -387,10 +399,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pasteboard.setString(text, forType: .string)
     }
 
-    private func showClipboardPicker(
+    private func showClipboardPicker(_ kind: ClipboardMenuKind) {
+        prepareClipboardPicker(kind)
+        box.open(clipboardPickerPanel)
+    }
+
+    /// Fills the picker in without showing it, so either the hotkey or the
+    /// command box can decide how it appears.
+    private func prepareClipboardPicker(
         _ kind: ClipboardMenuKind,
-        targetApplication capturedTarget: NSRunningApplication? = nil,
-        push: Bool = false
+        targetApplication capturedTarget: NSRunningApplication? = nil
     ) {
         let mode: ClipboardPickerMode
         switch kind {
@@ -416,12 +434,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Self.reactivate(targetApplication)
             }
         )
-
-        if push {
-            box.push(clipboardPickerPanel)
-        } else {
-            box.open(clipboardPickerPanel)
-        }
     }
 
     private func pastePickerResult(

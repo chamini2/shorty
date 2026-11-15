@@ -59,7 +59,11 @@ final class CommandBoxSettingsTests: XCTestCase {
         )
         let time = try XCTUnwrap(root.first { $0.title == "Time" })
 
-        XCTAssertEqual(CommandCatalog.entries(in: time, query: "").map(\.title), ["Caracas", "UTC"])
+        guard case let .list(zones) = time.destination else {
+            return XCTFail("Expected Time to lead to a list")
+        }
+
+        XCTAssertEqual(CommandCatalog.entries(in: zones, query: "").map(\.title), ["Caracas", "UTC"])
     }
 
     func testTimeGroupShowsLocalAndUTCThenConfiguredZones() throws {
@@ -77,9 +81,10 @@ final class CommandBoxSettingsTests: XCTestCase {
         )
         let time = try XCTUnwrap(root.first { $0.title == "Time" })
 
-        XCTAssertEqual(
-            CommandCatalog.entries(in: time, query: "").map(\.title),
-            ["Local", "UTC", "Tokyo"]
-        )
+        guard case let .list(zones) = time.destination else {
+            return XCTFail("Expected Time to lead to a list")
+        }
+
+        XCTAssertEqual(CommandCatalog.entries(in: zones, query: "").map(\.title), ["Local", "UTC", "Tokyo"])
     }
 }

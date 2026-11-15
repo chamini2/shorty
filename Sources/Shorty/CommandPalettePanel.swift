@@ -29,24 +29,35 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     private var entries: [CommandEntry] = []
     private var rowHeights: [CGFloat] = []
     private var selectedIndex = 0
-    /// Set when this list shows a group's children rather than the root.
-    private let group: CommandEntry?
+    /// Set when this list shows a destination's entries rather than the root.
+    private let listEntries: [CommandEntry]?
+    private let listTitle: String?
+    private let listSymbolName: String?
     private var isPresentingNestedPicker = false
     private var pendingInsertionRange: NSRange?
     private var selectionRangeAfterRefocus: NSRange?
     var pickerRequestHandler: ((ClipboardMenuKind) -> Void)?
     var actionHandler: ((CommandAction) -> Void)?
+    /// Supplies the bespoke views a list cannot render, such as the picker.
+    var viewProvider: ((CommandViewKind) -> ShortyBoxContent?)?
     var settings: CommandBoxSettings = .default
     /// Only the entry count is shown; the picker does the browsing.
     var history: [ClipboardItem] = []
 
     convenience init(box: ShortyBoxController) {
-        self.init(box: box, group: nil)
+        self.init(box: box, listEntries: nil, title: nil, symbolName: nil)
     }
 
-    init(box: ShortyBoxController, group: CommandEntry?) {
+    init(
+        box: ShortyBoxController,
+        listEntries: [CommandEntry]?,
+        title: String?,
+        symbolName: String?
+    ) {
         self.box = box
-        self.group = group
+        self.listEntries = listEntries
+        self.listTitle = title
+        self.listSymbolName = symbolName
         super.init()
 
         configureContent()
@@ -68,6 +79,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         window.makeFirstResponder(searchField)
         updateHeader()
         updateResults()
+        restoreSelectionAfterReturn()
     }
 
     func boxHandlesKey(_ event: NSEvent) -> Bool {
@@ -197,20 +209,22 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     /// The header names what is on screen: Command at the root, or the group
     /// you stepped into, such as Time.
     private func updateHeader() {
-        guard let group else {
+        guard let listTitle else {
             header.update(title: "Command", symbolName: "command")
             return
         }
 
-        header.update(title: group.title, symbolName: Self.symbolName(for: group))
+        header.update(title: listTitle, symbolName: listSymbolName ?? "square.grid.2x2")
     }
 
-    private static func symbolName(for group: CommandEntry) -> String {
-        switch group.id {
+    static func symbolName(for entry: CommandEntry) -> String {
+        switch entry.id {
         case "time":
             return "clock"
         case "clipboard.history":
             return "doc.on.clipboard"
+        case "window":
+            return "macwindow"
         default:
             return "square.grid.2x2"
         }
@@ -226,8 +240,8 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     private func updateResults(resetSelection: Bool = true) {
         let query = searchField.stringValue
 
-        if let group {
-            entries = CommandCatalog.entries(in: group, query: query)
+        if let listEntries {
+            entries = CommandCatalog.entries(in: listEntries, query: query)
         } else {
             entries = CommandCatalog.rootEntries(
                 query: query,
@@ -286,8 +300,10 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
 
         let entry = entries[selectedIndex]
 
-        if entry.isGroup {
-            enterGroup(entry)
+        if let destination = entry.destination {
+            // Coming back should land here, not at the top of the list.
+            selectedEntryIDBeforePush = entry.id
+            open(destination, from: entry)
             return
         }
 
@@ -296,22 +312,57 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             return
         }
 
-        if !action.keepsBoxOpen {
-            hide()
-        }
-
+        hide()
         actionHandler?(action)
     }
 
-    /// A group opens as its own list on the box's stack, the same way the
-    /// clipboard picker does, so going back is one rule rather than two.
-    private func enterGroup(_ group: CommandEntry) {
-        let list = CommandPalettePanelController(box: box, group: group)
-        list.settings = settings
-        list.history = history
-        list.actionHandler = actionHandler
-        list.pickerRequestHandler = pickerRequestHandler
-        box.push(list)
+    /// Remembers what was selected while a child list is open, so coming back
+    /// lands on the entry you left from rather than the top of the list.
+    private var selectedEntryIDBeforePush: String?
+
+    private func restoreSelectionAfterReturn() {
+        guard let id = selectedEntryIDBeforePush else {
+            return
+        }
+
+        selectedEntryIDBeforePush = nil
+
+        guard let index = entries.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        selectedIndex = index
+        renderRows()
+        contentView.layoutSubtreeIfNeeded()
+        scrollSelectionIntoView()
+    }
+
+    /// Both kinds of destination push onto the box's stack, so going back is
+    /// one rule. A list is rendered here; a view comes from the app.
+    private func open(_ destination: CommandDestination, from entry: CommandEntry) {
+        switch destination {
+        case let .list(entries):
+            let list = CommandPalettePanelController(
+                box: box,
+                listEntries: entries,
+                title: entry.title,
+                symbolName: Self.symbolName(for: entry)
+            )
+            list.settings = settings
+            list.history = history
+            list.actionHandler = actionHandler
+            list.pickerRequestHandler = pickerRequestHandler
+            list.viewProvider = viewProvider
+            box.push(list)
+
+        case let .view(kind):
+            guard let content = viewProvider?(kind) else {
+                NSSound.beep()
+                return
+            }
+
+            box.push(content)
+        }
     }
 
     private func resizePanel() {
@@ -366,11 +417,16 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             return true
 
         case UInt32(kVK_RightArrow):
-            guard entries.indices.contains(selectedIndex), entries[selectedIndex].isGroup else {
+            // Anything that goes somewhere opens with right, groups and the
+            // clipboard picker alike. With text to the right of the caret the
+            // key belongs to the search field.
+            guard entries.indices.contains(selectedIndex),
+                  entries[selectedIndex].navigates,
+                  caretIsAtEndOfQuery else {
                 return false
             }
 
-            enterGroup(entries[selectedIndex])
+            activateSelection()
             return true
 
         case UInt32(kVK_LeftArrow):
@@ -463,6 +519,11 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             selectionRangeAfterRefocus = newSelectionRange
         }
         setSelectedRange(newSelectionRange)
+    }
+
+    private var caretIsAtEndOfQuery: Bool {
+        let range = selectedRange()
+        return range.location + range.length >= (searchField.stringValue as NSString).length
     }
 
     private func selectedRange() -> NSRange {

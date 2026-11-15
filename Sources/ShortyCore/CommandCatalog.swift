@@ -1,24 +1,23 @@
 import Foundation
 
-/// What picking a command entry does.
+/// What picking a command entry does. An entry either runs one of these and
+/// the box closes, or it goes somewhere: see `CommandDestination`.
 public enum CommandAction: Equatable, Sendable {
     /// Put text on the pasteboard, such as a converted timestamp.
     case copyText(String)
     case moveWindow(WindowMoveCommand)
-    /// Hand over to the clipboard picker, which shows previews and snippets.
-    case openClipboard(ClipboardMenuKind)
 }
 
-public extension CommandAction {
-    /// Navigation leaves the box open; anything else has finished the job.
-    var keepsBoxOpen: Bool {
-        switch self {
-        case .openClipboard:
-            return true
-        case .copyText, .moveWindow:
-            return false
-        }
-    }
+/// Where an entry leads. A plain list of entries covers most of it; a view is
+/// for the few places a list cannot express, such as the clipboard picker with
+/// its previews and paste modes.
+public indirect enum CommandDestination: Equatable, Sendable {
+    case list([CommandEntry])
+    case view(CommandViewKind)
+}
+
+public enum CommandViewKind: Equatable, Sendable {
+    case clipboard(ClipboardMenuKind)
 }
 
 public struct CommandEntry: Equatable, Identifiable, Sendable {
@@ -27,8 +26,8 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
     /// Result text or a short hint, shown under the title.
     public let detail: String?
     public let action: CommandAction?
-    /// Non-empty for a group, which opens instead of running.
-    public let children: [CommandEntry]
+    /// Set when picking this goes somewhere instead of running something.
+    public let destination: CommandDestination?
     /// Extra words the query can match, beyond the title.
     public let keywords: [String]
 
@@ -37,25 +36,36 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
         title: String,
         detail: String? = nil,
         action: CommandAction? = nil,
-        children: [CommandEntry] = [],
+        destination: CommandDestination? = nil,
         keywords: [String] = []
     ) {
         self.id = id
         self.title = title
         self.detail = detail
         self.action = action
-        self.children = children
+        self.destination = destination
         self.keywords = keywords
     }
 
-    public var isGroup: Bool {
-        !children.isEmpty
+    /// Whether picking this takes you somewhere rather than finishing a job.
+    public var navigates: Bool {
+        destination != nil
     }
 
-    /// Whether picking this takes you somewhere rather than finishing a job.
-    /// Both a group and an action that keeps the box open earn the chevron.
-    public var navigates: Bool {
-        isGroup || action?.keepsBoxOpen == true
+    /// The same entry, labelled with the list it was found in.
+    func under(_ breadcrumb: String?) -> CommandEntry {
+        guard let breadcrumb else {
+            return self
+        }
+
+        return CommandEntry(
+            id: id,
+            title: "\(breadcrumb) › \(title)",
+            detail: detail,
+            action: action,
+            destination: destination,
+            keywords: keywords
+        )
     }
 }
 
@@ -85,8 +95,9 @@ public enum CommandCatalog {
             + matching(actions, query: normalizedQuery)
     }
 
-    public static func entries(in group: CommandEntry, query: String) -> [CommandEntry] {
-        matching(group.children, query: query.trimmingCharacters(in: .whitespacesAndNewlines))
+    /// The entries a list destination holds, filtered by what was typed.
+    public static func entries(in list: [CommandEntry], query: String) -> [CommandEntry] {
+        matching(list, query: query.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     /// Conversions of the typed text, such as an epoch timestamp or a size.
@@ -128,34 +139,47 @@ public enum CommandCatalog {
                 id: "clipboard.history",
                 title: "Clipboard History",
                 detail: history.isEmpty ? "Nothing copied yet" : "\(history.count) entries",
-                action: .openClipboard(.combined),
+                destination: .view(.clipboard(.combined)),
                 keywords: ["paste", "copy", "clipboard", "snippet"]
             ),
             CommandEntry(
                 id: "time",
                 title: "Time",
                 detail: "Current time around the world",
-                children: timeEntries(now: now, localTimeZone: localTimeZone, settings: settings),
-                keywords: ["clock", "timezone", "zone", "utc"]
+                destination: .list(timeEntries(now: now, localTimeZone: localTimeZone, settings: settings)),
+                keywords: ["clock", "timezone", "zone"]
             ),
-            windowEntry("left-half", "Move Window Left Half", .cycleHalf(.left)),
-            windowEntry("right-half", "Move Window Right Half", .cycleHalf(.right)),
-            windowEntry("maximize", "Maximize Window", .maximize),
-            windowEntry("left-monitor", "Move Window to Left Monitor", .moveToMonitor(.left)),
-            windowEntry("right-monitor", "Move Window to Right Monitor", .moveToMonitor(.right)),
+            CommandEntry(
+                id: "window",
+                title: "Window",
+                detail: "Move the focused window",
+                destination: .list(windowEntries()),
+                keywords: ["layout", "position", "arrange"]
+            ),
+        ]
+    }
+
+    private static func windowEntries() -> [CommandEntry] {
+        [
+            windowEntry("left-half", "Left Half", .cycleHalf(.left), ["half", "split"]),
+            windowEntry("right-half", "Right Half", .cycleHalf(.right), ["half", "split"]),
+            windowEntry("maximize", "Maximize", .maximize, ["full", "fill"]),
+            windowEntry("left-monitor", "Left Monitor", .moveToMonitor(.left), ["display", "screen", "monitor"]),
+            windowEntry("right-monitor", "Right Monitor", .moveToMonitor(.right), ["display", "screen", "monitor"]),
         ]
     }
 
     private static func windowEntry(
         _ id: String,
         _ title: String,
-        _ command: WindowMoveCommand
+        _ command: WindowMoveCommand,
+        _ extraKeywords: [String]
     ) -> CommandEntry {
         CommandEntry(
             id: "window.\(id)",
             title: title,
             action: .moveWindow(command),
-            keywords: ["window", "move", "screen", "display"]
+            keywords: ["window", "move"] + extraKeywords
         )
     }
 

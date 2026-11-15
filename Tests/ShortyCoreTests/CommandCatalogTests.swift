@@ -5,23 +5,43 @@ final class CommandCatalogTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 0)
     private let madrid = TimeZone(identifier: "Europe/Madrid")!
 
+    private var settings: CommandBoxSettings {
+        (try? CommandBoxSettingsParser.parse(yaml: """
+        command-box:
+          timezones: [San Francisco, Tokyo]
+        """)) ?? .default
+    }
+
     private func root(_ query: String) -> [CommandEntry] {
-        CommandCatalog.rootEntries(query: query, now: now, localTimeZone: madrid)
+        CommandCatalog.rootEntries(query: query, now: now, localTimeZone: madrid, settings: settings)
     }
 
     func testEmptyQueryListsTheCommands() {
         let entries = root("")
 
-        XCTAssertEqual(entries.first?.title, "Clipboard History")
+        XCTAssertEqual(entries.map(\.title), ["Clipboard History", "Time", "Window"])
         XCTAssertFalse(entries.contains { $0.title == "Snippets" }, "the picker already lists them")
-        XCTAssertEqual(entries.filter { $0.action == nil }.count, 1, "only Time is a group")
-        XCTAssertEqual(
-            entries.filter {
+        XCTAssertFalse(
+            entries.contains {
                 if case .moveWindow = $0.action { return true }
                 return false
-            }.count,
-            5
+            },
+            "window moves live in their own group"
         )
+    }
+
+    func testWindowGroupHoldsTheMoves() throws {
+        let window = try XCTUnwrap(root("").first { $0.title == "Window" })
+
+        guard case let .list(moves) = window.destination else {
+            return XCTFail("Expected Window to lead to a list")
+        }
+
+        XCTAssertEqual(
+            CommandCatalog.entries(in: moves, query: "").map(\.title),
+            ["Left Half", "Right Half", "Maximize", "Left Monitor", "Right Monitor"]
+        )
+        XCTAssertEqual(CommandCatalog.entries(in: moves, query: "monitor").count, 2)
     }
 
     func testEmptyQueryShowsNoConversions() {
@@ -37,19 +57,22 @@ final class CommandCatalogTests: XCTestCase {
     }
 
     func testFiltersByTitleAndKeyword() {
-        XCTAssertTrue(root("maxim").contains { $0.title == "Maximize Window" })
         XCTAssertTrue(root("paste").contains { $0.title == "Clipboard History" })
+        XCTAssertTrue(root("timezone").contains { $0.title == "Time" })
         XCTAssertTrue(root("zzzz").isEmpty)
     }
 
     func testTimeGroupHoldsTheZones() throws {
         let time = try XCTUnwrap(root("").first { $0.title == "Time" })
-        XCTAssertTrue(time.isGroup)
 
-        let zones = CommandCatalog.entries(in: time, query: "")
+        guard case let .list(entries) = time.destination else {
+            return XCTFail("Expected Time to lead to a list")
+        }
+
+        let zones = CommandCatalog.entries(in: entries, query: "")
         XCTAssertEqual(zones.map(\.title).prefix(2).map(String.init), ["Local", "UTC"])
         XCTAssertEqual(zones.first { $0.title == "UTC" }?.detail, "1970-01-01 00:00:00 GMT")
-        XCTAssertEqual(CommandCatalog.entries(in: time, query: "japan").count, 1)
+        XCTAssertEqual(CommandCatalog.entries(in: entries, query: "japan").count, 1)
     }
 
     func testChevronMarksAnythingThatNavigates() throws {
@@ -57,7 +80,13 @@ final class CommandCatalogTests: XCTestCase {
 
         XCTAssertTrue(try XCTUnwrap(entries.first { $0.title == "Time" }).navigates)
         XCTAssertTrue(try XCTUnwrap(entries.first { $0.title == "Clipboard History" }).navigates)
-        XCTAssertFalse(try XCTUnwrap(entries.first { $0.title == "Maximize Window" }).navigates)
+
+        let window = try XCTUnwrap(entries.first { $0.title == "Window" })
+        guard case let .list(moves) = window.destination else {
+            return XCTFail("Expected Window to lead to a list")
+        }
+
+        XCTAssertFalse(try XCTUnwrap(moves.first { $0.title == "Maximize" }).navigates)
     }
 
     func testZonesAreNoLongerTopLevelCommands() {
