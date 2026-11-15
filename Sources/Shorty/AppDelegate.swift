@@ -110,7 +110,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         stateMenuItem.isEnabled = false
         pathMenuItem.isEnabled = false
-        pathMenuItem.title = controller.options.configURL.path
+        pathMenuItem.title = Self.menuLine(controller.options.configURL.path)
+        pathMenuItem.toolTip = controller.options.configURL.path
         shortcutsHeaderItem.isEnabled = false
         emptyShortcutsItem.isEnabled = false
 
@@ -173,8 +174,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatus(_ message: String) {
-        stateMenuItem.title = message
+        // The full text goes in the tooltip: a status line long enough to
+        // mention a path stretches the whole menu to match.
+        stateMenuItem.title = Self.menuLine(message)
+        stateMenuItem.toolTip = message
         statusItem?.button?.toolTip = message
+    }
+
+    /// Keeps a menu line short enough that it does not set the menu's width,
+    /// shortening the home folder and dropping the middle of what is left,
+    /// where the ends carry the meaning.
+    static func menuLine(_ text: String, limit: Int = 44) -> String {
+        let shortened = (text as NSString).abbreviatingWithTildeInPath
+
+        guard shortened.count > limit else {
+            return shortened
+        }
+
+        let ellipsis = "…"
+        let keep = limit - ellipsis.count
+        let leading = shortened.prefix(keep - keep / 2)
+        let trailing = shortened.suffix(keep / 2)
+
+        return "\(leading)\(ellipsis)\(trailing)"
     }
 
     private func reloadShortcutItems() {
@@ -198,7 +220,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         for (offset, summary) in summaries.enumerated() {
-            let item = NSMenuItem(title: summary, action: nil, keyEquivalent: "")
+            let item = NSMenuItem(title: Self.menuLine(summary), action: nil, keyEquivalent: "")
+            item.toolTip = summary
             item.isEnabled = false
             dynamicShortcutItems.append(item)
             menu.insertItem(item, at: insertionIndex + offset)

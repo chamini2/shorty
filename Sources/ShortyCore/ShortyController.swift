@@ -105,9 +105,9 @@ public final class ShortyController {
             }
 
             let snippetCount = configuration.snippetGroups.reduce(0) { $0 + $1.snippets.count }
-            let message = "Loaded \(configuration.shortcuts.count) shortcut(s) and \(snippetCount) snippet(s) from \(options.configURL.path)."
-            console.info("\(message) Reason: \(reason).")
-            publishStatus(message)
+            let summary = "Loaded \(configuration.shortcuts.count) shortcut(s) and \(snippetCount) snippet(s)."
+            console.info("\(summary) From \(options.configURL.path). Reason: \(reason).")
+            publishStatus(summary)
         } catch {
             let snippetCount = loadedSnippetGroups.reduce(0) { $0 + $1.snippets.count }
             let fallback = loadedShortcuts.isEmpty && snippetCount == 0
