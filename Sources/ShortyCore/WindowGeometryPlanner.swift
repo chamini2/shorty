@@ -26,6 +26,53 @@ public enum WindowGeometryPlanner {
         }
     }
 
+    /// Grows or shrinks a window by a share of its display, keeping it where
+    /// it is on screen. Returns nil when there is nowhere left to go, so a
+    /// window already filling the screen says so rather than appearing to
+    /// refuse the change.
+    public static func resizedFrame(
+        for windowFrame: CGRect,
+        screens: [CGRect],
+        by step: CGFloat,
+        minimumRatio: CGFloat = 0.2
+    ) -> CGRect? {
+        let screens = orderedScreens(screens)
+
+        guard let index = screenIndex(containing: windowFrame, screens: screens) else {
+            return nil
+        }
+
+        let screen = screens[index]
+        let windowFrame = windowFrame.standardized
+
+        let minimum = CGSize(
+            width: screen.width * minimumRatio,
+            height: screen.height * minimumRatio
+        )
+        let size = CGSize(
+            width: min(max(windowFrame.width + screen.width * step, minimum.width), screen.width),
+            height: min(max(windowFrame.height + screen.height * step, minimum.height), screen.height)
+        )
+
+        guard !isApproximately(size, windowFrame.size) else {
+            return nil
+        }
+
+        // Grow around the middle of the window, then nudge back inside the
+        // screen rather than letting an edge slide off it.
+        let centred = CGRect(
+            x: windowFrame.midX - size.width / 2,
+            y: windowFrame.midY - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
+
+        return CGRect(
+            origin: fittingOrigin(for: centred, actualSize: size, screens: [screen]),
+            size: size
+        )
+    }
+
     public static func maximizeFrame(on screen: CGRect) -> CGRect {
         screen.standardized
     }
