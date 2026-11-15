@@ -276,12 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let image = NSImage(
-            systemSymbolName: active ? "cup.and.saucer.fill" : "cup.and.saucer",
-            accessibilityDescription: active ? "Shorty, keeping the Mac awake" : "Shorty"
-        )
-        image?.isTemplate = true
-        button.image = image
+        button.image = StatusIcon.cup(filled: active)
     }
 
     private func showCommandPalette() {
