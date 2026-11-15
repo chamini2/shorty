@@ -9,7 +9,7 @@
 | 3 | [Clipboard manager + snippets](#3-clipboard-manager--snippets): searchable clipboard history and YAML snippets | `cmd+shift+v`, `cmd+shift+b` |
 | 4 | [Command box](#4-command-box): epoch timestamps, byte units, time zones | `option+space` |
 
-All built-in hotkeys are reserved and cannot be reused by app shortcuts.
+Every built-in hotkey can be rebound or switched off in [Hotkeys](#hotkeys). A bound key cannot be reused by an app shortcut.
 
 ## 1. Global App Shortcuts
 
@@ -142,6 +142,23 @@ snippets:
 
 Each group is a folder in the picker, each key is an item title, and the value is pasted as plain text. Order follows the config.
 
+Snippets sit above the clipboard history in the picker. The picker opens on the
+newest history entry, so snippets are one `up` away and never in the way.
+
+### Picker Keys
+
+| Key | Action |
+| --- | --- |
+| `return` | Paste the entry, keeping rich text |
+| `cmd+return` | Copy to the clipboard without pasting |
+| `option+return` | Paste as plain text |
+| `shift+return` | Paste with blank lines dropped and lines joined |
+| `cmd+backspace` | Delete the selected history entry |
+| `cmd+v` / `cmd+c` / `cmd+x` / `cmd+a` | Edit the search field |
+
+Modifiers also work on click, and `shift` wins over `cmd`, which wins over
+`option`.
+
 ## 4. Command Box
 
 `option+space` opens a command box. Type a command and see the result live. `return` copies the result to the clipboard; `escape` closes.
@@ -154,6 +171,62 @@ Each group is a folder in the picker, each key is an item title, and the value i
 | `utc time`, `et time`, `cet time`, `turkey time`, `dubai time`, `korea time`, `japan time` | Current time in that zone |
 
 Inside the command box, `cmd+shift+v` / `cmd+shift+b` open the clipboard / snippets picker and insert the chosen text at the cursor.
+
+To turn the command box off, set `command-box: off` under `hotkeys`. Shorty then leaves `option+space` to other apps, and an app shortcut may use it.
+
+## Hotkeys
+
+Every built-in key lives in an optional top-level `hotkeys` section. Set a key to rebind it, or to `off` to unbind it:
+
+```yaml
+hotkeys:
+  clipboard-menu: cmd+shift+v
+  snippets-menu: cmd+shift+b
+  command-box: off
+  window-switcher:
+    all-windows: cmd+tab
+    current-app: cmd+grave
+  window-movement:
+    left-half: ctrl+option+left
+    right-half: ctrl+option+right
+    maximize: ctrl+option+cmd+up
+    left-monitor: ctrl+option+cmd+left
+    right-monitor: ctrl+option+cmd+right
+```
+
+- A binding you leave out keeps its default key. Only an explicit `off` unbinds one, so an upgrade never silently removes a feature. `false`, `none` and an empty value also work.
+- `window-switcher` and `window-movement` take their own keys, or `off` to unbind the whole group in one line.
+- No key, no feature: an unbound action is not registered at all, and its background work never starts. With both `window-switcher` keys off, the global event tap and the window index stay down. With `clipboard-menu`, `snippets-menu`, and `command-box` all off, Shorty stops recording clipboard history, since nothing can show it.
+- Switcher keys need a modifier, because the switcher cycles while you hold it.
+- A built-in binding and an app shortcut cannot share a key. Unbind the built-in to hand the key over.
+
+Bindings apply on config reload, so no restart is needed.
+
+## Command Box
+
+The command box lists what Shorty can do, so you can browse instead of
+remembering. Arrow keys move, `return` runs the selection, `right` opens a
+group and `left` leaves it. Typing filters by name, and timestamps or sizes you
+type are converted at the top of the list.
+
+Commands that go somewhere carry a `›`: `Clipboard History` opens the picker,
+while `Time` and `Window` open lists of their own. `Keep the Mac Awake` holds
+off idle and display sleep until you turn it off again, like `caffeinate`.
+
+`Time` shows your own zone, named after its city, and UTC. Add more by name, no
+identifiers needed:
+
+```yaml
+command-box:
+  timezones:
+    - Tokyo
+    - New York
+    - Istanbul
+```
+
+A city name, a zone identifier such as `Asia/Tokyo`, or an abbreviation such as
+`JST` all work, and the name you write becomes the label. A name that does not
+resolve fails the config with suggestions.
 
 ## Setup
 
@@ -170,12 +243,14 @@ Inside the command box, `cmd+shift+v` / `cmd+shift+b` open the clipboard / snipp
 open ./dist/Shorty.app
 ```
 
-The app reads its config from `~/config/shorty.yaml`:
+The app reads its config from `~/.shorty/config.yaml`:
 
 ```bash
-mkdir -p "$HOME/config"
-cp ./Config.sample.yaml "$HOME/config/shorty.yaml"
+mkdir -p "$HOME/.shorty"
+cp ./Config.sample.yaml "$HOME/.shorty/config.yaml"
 ```
+
+If `~/.shorty/config.yaml` is missing, Shorty falls back to the old `~/config/shorty.yaml` path. Move that file to `~/.shorty/config.yaml` when you want the hidden folder.
 
 Shorty reloads the config automatically when you save it.
 
@@ -184,6 +259,31 @@ After code changes, run `./build-app.sh` again, quit Shorty from the menu bar, a
 ### Accessibility Permission
 
 On first launch macOS should prompt for Accessibility access. The menu bar `Open Accessibility Settings` item links to the pane. If Shorty is not listed, add it manually in `System Settings > Privacy & Security > Accessibility` (add `dist/Shorty.app` for the app, or the raw binary when running from `.build`).
+
+### Signing
+
+`build-app.sh` signs the app ad-hoc by default. An ad-hoc signature changes with
+every build, so macOS treats each reinstall as a different app and drops its
+Accessibility approval. Creating one local signing identity keeps the signature
+stable and the approval with it.
+
+Make the identity once, in Keychain Access:
+
+1. `Keychain Access > Certificate Assistant > Create a Certificate…`
+2. Name `Shorty Local Signing`, Identity Type `Self Signed Root`, Certificate
+   Type `Code Signing`, then create it.
+
+`build-app.sh` picks it up automatically on the next build. Use another name by
+setting `SHORTY_SIGN_IDENTITY`. With no identity present the build still works,
+signs ad-hoc, and warns that the permission will reset.
+
+A self-signed certificate is normally untrusted, so `security find-identity -p
+codesigning` lists nothing even when signing works. The build therefore tries
+the identity and falls back only if `codesign` refuses it.
+
+Approve Accessibility once more after the first signed build: the signature
+changes from ad-hoc to the new identity, which macOS sees as a new app. From
+then on the approval survives reinstalls.
 
 ### Development Build
 
@@ -197,7 +297,7 @@ If the project directory moved and SwiftPM has stale module-cache paths, `build.
 ### Command Line
 
 ```text
-Shorty [--config PATH]                       Run (default config: ~/config/shorty.yaml)
+Shorty [--config PATH]                       Run (default config: ~/.shorty/config.yaml)
 Shorty --validate-config [--config PATH]     Validate config and exit
 Shorty --list-windows [--verbose]            Print accessible windows and match values
 Shorty --help

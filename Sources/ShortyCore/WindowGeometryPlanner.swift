@@ -6,7 +6,7 @@ public enum WindowHalf: Sendable {
     case right
 }
 
-public enum WindowMoveDirection: Sendable {
+public enum WindowMoveDirection: Equatable, Sendable {
     case left
     case right
 }

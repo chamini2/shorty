@@ -51,6 +51,16 @@ public final class HotKeyCenter {
             let registered = try register(shortcut.hotKey)
             registeredShortcutRefs.append(registered.reference)
             shortcutsByEventID[registered.eventID] = shortcut
+
+            // An alias is a convenience: losing one must not fail the config.
+            for alias in shortcut.aliasHotKeys {
+                guard let registeredAlias = try? register(alias) else {
+                    continue
+                }
+
+                registeredShortcutRefs.append(registeredAlias.reference)
+                shortcutsByEventID[registeredAlias.eventID] = shortcut
+            }
         }
     }
 
@@ -65,6 +75,10 @@ public final class HotKeyCenter {
                 registeredActionRefs.append(registered.reference)
                 actionsByEventID[registered.eventID] = action.handler
             } catch {
+                guard !action.isOptional else {
+                    continue
+                }
+
                 failures.append("\(action.hotKey.normalizedValue): \(error)")
             }
         }
@@ -178,10 +192,13 @@ public final class HotKeyCenter {
 
 public struct HotKeyAction {
     public let hotKey: KeyCombo
+    /// Convenience bindings such as keypad aliases: skipped when unavailable.
+    public let isOptional: Bool
     fileprivate let handler: () -> Void
 
-    public init(hotKey: KeyCombo, handler: @escaping () -> Void) {
+    public init(hotKey: KeyCombo, isOptional: Bool = false, handler: @escaping () -> Void) {
         self.hotKey = hotKey
+        self.isOptional = isOptional
         self.handler = handler
     }
 }

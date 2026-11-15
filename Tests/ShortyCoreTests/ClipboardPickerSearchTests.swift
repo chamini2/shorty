@@ -2,7 +2,7 @@ import XCTest
 @testable import ShortyCore
 
 final class ClipboardPickerSearchTests: XCTestCase {
-    func testRootEntriesUseMenuShapeWithHistoryOverflowAndSnippetFolders() throws {
+    func testRootEntriesListHistoryFlatAndSnippetsAsFolders() throws {
         let history = (1...45).map { ClipboardItem(plainText: "History \($0)") }
         let groups = [
             SnippetGroup(
@@ -22,30 +22,36 @@ final class ClipboardPickerSearchTests: XCTestCase {
             mode: .all
         )
 
-        XCTAssertEqual(entries[0], .header("History"))
-        XCTAssertEqual(entries[1...20].compactMap(\.pasteResult), history.prefix(20).map { .history($0) })
-        XCTAssertEqual(entries[21].title, "21 - 40")
-        XCTAssertEqual(entries[22].title, "41 - 45")
-        XCTAssertEqual(entries[23], .header("Snippets"))
-        XCTAssertEqual(entries[24].title, "Work")
-        XCTAssertEqual(entries[25].title, "Personal")
+        XCTAssertEqual(entries[0], .header("Snippets"))
+        XCTAssertEqual(entries[1].title, "Work")
+        XCTAssertEqual(entries[2].title, "Personal")
+        XCTAssertEqual(entries[3], .header("History"))
+        XCTAssertEqual(entries[4...48].compactMap(\.pasteResult), history.map { .history($0) })
 
-        guard case let .folder(firstHistoryFolder) = entries[21] else {
-            return XCTFail("Expected first history overflow folder")
-        }
+        // Only snippet groups are folders now; history is one scrollable list.
+        XCTAssertTrue(entries[4...48].allSatisfy { $0.folder == nil })
 
-        XCTAssertEqual(
-            firstHistoryFolder.entries.compactMap(\.pasteResult),
-            history[20..<40].map { .history($0) }
-        )
-
-        guard case let .folder(workFolder) = entries[24] else {
+        guard case let .folder(workFolder) = entries[1] else {
             return XCTFail("Expected snippet folder")
         }
 
         XCTAssertEqual(workFolder.entries, [
             .snippet(groupTitle: "Work", snippet: groups[0].snippets[0]),
         ])
+    }
+
+    func testHistoryIsCappedAtTheVisibleLimit() {
+        let history = (1...(ClipboardConstants.maxVisibleItems + 30))
+            .map { ClipboardItem(plainText: "History \($0)") }
+
+        let entries = ClipboardPickerSearch.rootEntries(
+            history: history,
+            snippetGroups: [],
+            query: "",
+            mode: .all
+        )
+
+        XCTAssertEqual(entries.compactMap(\.pasteResult).count, ClipboardConstants.maxVisibleItems)
     }
 
     func testRootSearchFlattensMatchingDescendants() throws {
@@ -160,10 +166,24 @@ final class ClipboardPickerSearchTests: XCTestCase {
         XCTAssertEqual(presentation.trailingLineCountLabel, "+2")
     }
 
-    func testActivationModeUsesCommandForPlainText() {
+    func testActivationModeUsesCommandForCopyOnly() {
         XCTAssertEqual(
             ClipboardPickerActivationMode.fromModifiers(command: true, shift: false),
+            .copyOnly
+        )
+    }
+
+    func testActivationModeUsesOptionForPlainText() {
+        XCTAssertEqual(
+            ClipboardPickerActivationMode.fromModifiers(command: false, shift: false, option: true),
             .plainText
+        )
+    }
+
+    func testActivationModeGivesCommandPrecedenceOverOption() {
+        XCTAssertEqual(
+            ClipboardPickerActivationMode.fromModifiers(command: true, shift: false, option: true),
+            .copyOnly
         )
     }
 

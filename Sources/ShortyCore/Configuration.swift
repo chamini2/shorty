@@ -33,7 +33,10 @@ public struct LaunchOptions {
     public let mode: LaunchMode
     public let windowListFormat: WindowListFormat
 
-    public init(arguments: [String]) throws {
+    public init(
+        arguments: [String],
+        fileExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
+    ) throws {
         var configPath: String?
         var mode: LaunchMode = .run
         var windowListFormat: WindowListFormat = .plain
@@ -71,7 +74,7 @@ public struct LaunchOptions {
             index += 1
         }
 
-        let resolvedPath = configPath ?? Self.defaultConfigURL.path
+        let resolvedPath = configPath ?? Self.resolvedDefaultConfigURL(fileExists: fileExists).path
         let expandedPath = (resolvedPath as NSString).expandingTildeInPath
 
         self.configURL = URL(fileURLWithPath: expandedPath)
@@ -82,8 +85,26 @@ public struct LaunchOptions {
     public static var defaultConfigURL: URL {
         FileManager.default
             .homeDirectoryForCurrentUser
+            .appendingPathComponent(".shorty")
+            .appendingPathComponent("config.yaml")
+    }
+
+    /// Pre-`~/.shorty` location, still read when the current default is absent.
+    public static var legacyDefaultConfigURL: URL {
+        FileManager.default
+            .homeDirectoryForCurrentUser
             .appendingPathComponent("config")
             .appendingPathComponent("shorty.yaml")
+    }
+
+    public static func resolvedDefaultConfigURL(
+        fileExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
+    ) -> URL {
+        if !fileExists(defaultConfigURL), fileExists(legacyDefaultConfigURL) {
+            return legacyDefaultConfigURL
+        }
+
+        return defaultConfigURL
     }
 
     public static let usage = """
@@ -182,7 +203,7 @@ public enum ConfigurationError: Error, CustomStringConvertible {
     case invalidWindowIndex(String, Int)
     case invalidRegex(field: String, shortcutID: String, error: Error)
     case duplicateHotkey(String)
-    case reservedHotkey(String, String)
+    case hotkeyConflict(hotkey: String, binding: String, shortcutID: String)
     case invalidSnippets(String)
 
     public var description: String {
@@ -202,8 +223,8 @@ public enum ConfigurationError: Error, CustomStringConvertible {
             return "Shortcut `\(shortcutID)` has invalid regex for `\(field)`: \(error.localizedDescription)"
         case let .duplicateHotkey(hotkey):
             return "Duplicate hotkey `\(hotkey)` in config."
-        case let .reservedHotkey(hotkey, usage):
-            return "Shortcut hotkey `\(hotkey)` is reserved for the \(usage)."
+        case let .hotkeyConflict(hotkey, binding, shortcutID):
+            return "Hotkey `\(hotkey)` is used by both the `\(binding)` binding and shortcut `\(shortcutID)`. Set `\(binding): off` to free it."
         case let .invalidSnippets(message):
             return "Invalid snippets config: \(message)"
         }
@@ -213,12 +234,25 @@ public enum ConfigurationError: Error, CustomStringConvertible {
 public struct LoadedConfiguration {
     public let shortcuts: [LoadedShortcut]
     public let snippetGroups: [SnippetGroup]
+    public let bindings: HotKeyBindings
+    public let commandBox: CommandBoxSettings
+    /// Shared by shortcuts and built-in bindings, so both see the same claims.
+    public let numpadAliases: NumpadAliasResolver
 }
 
 public struct LoadedShortcut {
     public let id: String
     public let hotKey: KeyCombo
     public let matcher: WindowMatcher
+    /// Extra combos that trigger the same shortcut, such as the keypad twin.
+    public let aliasHotKeys: [KeyCombo]
+
+    public init(id: String, hotKey: KeyCombo, matcher: WindowMatcher, aliasHotKeys: [KeyCombo] = []) {
+        self.id = id
+        self.hotKey = hotKey
+        self.matcher = matcher
+        self.aliasHotKeys = aliasHotKeys
+    }
 }
 
 public struct WindowMatcher {
@@ -380,9 +414,17 @@ public enum ConfigurationLoader {
         let contents = String(decoding: data, as: UTF8.self)
         let configuration = try YAMLDecoder().decode(ConfigurationFile.self, from: contents)
         let snippetGroups = try parseSnippetGroups(from: contents)
+        let bindings = try HotKeyBindingsParser.parse(yaml: contents)
+        let commandBox = try CommandBoxSettingsParser.parse(yaml: contents)
+        let customizesBindings = bindings != .default || commandBox != .default
 
-        guard !configuration.shortcuts.isEmpty || !snippetGroups.isEmpty else {
+        guard !configuration.shortcuts.isEmpty || !snippetGroups.isEmpty || customizesBindings else {
             throw ConfigurationError.emptyConfiguration
+        }
+
+        var bindingsByHotkey: [String: String] = [:]
+        for action in bindings.boundActions {
+            bindingsByHotkey[action.hotKey.normalizedValue] = action.name
         }
 
         var seenHotkeys = Set<String>()
@@ -401,8 +443,12 @@ public enum ConfigurationLoader {
             }
 
             let hotKey = try KeyCombo.parse(shortcut.hotkey)
-            if let reservedUsage = ReservedHotKeys.descriptionsByNormalizedValue[hotKey.normalizedValue] {
-                throw ConfigurationError.reservedHotkey(hotKey.normalizedValue, reservedUsage)
+            if let binding = bindingsByHotkey[hotKey.normalizedValue] {
+                throw ConfigurationError.hotkeyConflict(
+                    hotkey: hotKey.normalizedValue,
+                    binding: binding,
+                    shortcutID: shortcutID
+                )
             }
             guard seenHotkeys.insert(hotKey.normalizedValue).inserted else {
                 throw ConfigurationError.duplicateHotkey(hotKey.normalizedValue)
@@ -429,7 +475,31 @@ public enum ConfigurationLoader {
             )
         }
 
-        return LoadedConfiguration(shortcuts: loadedShortcuts, snippetGroups: snippetGroups)
+        let claimedHotKeys = bindings.boundActions.map(\.hotKey) + loadedShortcuts.map(\.hotKey)
+        let numpadAliases = NumpadAliasResolver(claimedHotKeys: claimedHotKeys)
+        var takenAliases = Set<String>()
+
+        loadedShortcuts = loadedShortcuts.map { shortcut in
+            guard let alias = numpadAliases.alias(for: shortcut.hotKey),
+                  takenAliases.insert(alias.normalizedValue).inserted else {
+                return shortcut
+            }
+
+            return LoadedShortcut(
+                id: shortcut.id,
+                hotKey: shortcut.hotKey,
+                matcher: shortcut.matcher,
+                aliasHotKeys: [alias]
+            )
+        }
+
+        return LoadedConfiguration(
+            shortcuts: loadedShortcuts,
+            snippetGroups: snippetGroups,
+            bindings: bindings,
+            commandBox: commandBox,
+            numpadAliases: numpadAliases
+        )
     }
 
     private static func parseSnippetGroups(from contents: String) throws -> [SnippetGroup] {

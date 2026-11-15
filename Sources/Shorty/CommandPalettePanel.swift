@@ -3,9 +3,10 @@ import Carbon
 import ShortyCore
 
 @MainActor
-final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFieldDelegate {
+final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFieldDelegate {
     private enum Metrics {
-        static let panelWidth: CGFloat = 760
+        static let panelWidth: CGFloat = 820
+        static let panelHeight: CGFloat = 440
         static let topPadding: CGFloat = 9
         static let emptyBottomPadding: CGFloat = 10
         static let resultBottomPadding: CGFloat = 5
@@ -18,56 +19,89 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
         static let bottomMargin: CGFloat = 20
     }
 
-    private let panel: CommandPalettePanelWindow
-    private let searchField = CommandPaletteTextField(frame: .zero)
+    private let box: ShortyBoxController
+    private let contentView = NSView()
+    private let header = ShortyBoxHeaderView()
+    private var searchField: ShortyBoxSearchField { header.searchField }
     private let stackView = NSStackView()
-    private var entries: [CommandTransformerEvaluation] = []
+    private let scrollView = NSScrollView()
+    private let listContainer = CommandPaletteListContainerView()
+    private var entries: [CommandEntry] = []
     private var rowHeights: [CGFloat] = []
+    private var selectedIndex = 0
+    /// Set when this list shows a destination's entries rather than the root.
+    private let listEntries: [CommandEntry]?
+    private let listTitle: String?
+    private let listSymbolName: String?
     private var isPresentingNestedPicker = false
     private var pendingInsertionRange: NSRange?
     private var selectionRangeAfterRefocus: NSRange?
     var pickerRequestHandler: ((ClipboardMenuKind) -> Void)?
+    var actionHandler: ((CommandAction) -> Void)?
+    /// Supplies the bespoke views a list cannot render, such as the picker.
+    var viewProvider: ((CommandViewKind) -> ShortyBoxContent?)?
+    var settings: CommandBoxSettings = .default
+    /// Only the entry count is shown; the picker does the browsing.
+    var history: [ClipboardItem] = []
+    var keepAwake = false
 
-    override init() {
-        panel = CommandPalettePanelWindow(
-            contentRect: NSRect(x: 0, y: 0, width: Metrics.panelWidth, height: 120),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
+    convenience init(box: ShortyBoxController) {
+        self.init(box: box, listEntries: nil, title: nil, symbolName: nil)
+    }
+
+    init(
+        box: ShortyBoxController,
+        listEntries: [CommandEntry]?,
+        title: String?,
+        symbolName: String?
+    ) {
+        self.box = box
+        self.listEntries = listEntries
+        self.listTitle = title
+        self.listSymbolName = symbolName
         super.init()
 
-        configurePanel()
+        configureContent()
         configureSearchField()
         configureStackView()
+    }
+
+    var isPresented: Bool {
+        box.isPresenting(self)
+    }
+
+    // MARK: ShortyBoxContent
+
+    var view: NSView {
+        contentView
+    }
+
+    func boxDidPresent(in window: NSWindow) {
+        window.makeFirstResponder(searchField)
+        updateHeader()
+        updateResults()
+        restoreSelectionAfterReturn()
+    }
+
+    func boxHandlesKey(_ event: NSEvent) -> Bool {
+        handlePanelKeyEvent(event)
     }
 
     func show() {
         searchField.stringValue = ""
         selectionRangeAfterRefocus = nil
+        updateHeader()
         updateResults()
         resizePanel()
-        positionPanel()
 
-        NSApp.activate(ignoringOtherApps: true)
-        panel.orderFrontRegardless()
-        panel.makeKeyAndOrderFront(nil)
-        panel.makeFirstResponder(searchField)
+        box.open(self)
     }
+
+
 
     func hide() {
         isPresentingNestedPicker = false
-        panel.orderOut(nil)
-    }
-
-    func windowDidResignKey(_ notification: Notification) {
-        guard !isPresentingNestedPicker else {
-            return
-        }
-
-        if panel.isVisible {
-            hide()
-        }
+        box.close()
     }
 
     func insertTextFromPicker(_ text: String) {
@@ -86,7 +120,7 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
             return true
         }
 
-        guard panel.isVisible else {
+        guard isPresented else {
             return false
         }
 
@@ -106,69 +140,94 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
         switch commandSelector {
         case #selector(NSResponder.insertNewline(_:)),
             #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
-            copyFirstCompleteResult()
+            activateSelection()
+            return true
+
+        case #selector(NSResponder.moveUp(_:)):
+            moveSelection(by: -1)
+            return true
+
+        case #selector(NSResponder.moveDown(_:)):
+            moveSelection(by: 1)
             return true
 
         case #selector(NSResponder.cancelOperation(_:)):
-            hide()
-            return true
+            // The box handles escape.
+            return false
 
         default:
             return false
         }
     }
 
-    private func configurePanel() {
-        panel.isReleasedWhenClosed = false
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-        panel.hidesOnDeactivate = false
-        panel.appearance = NSAppearance(named: .darkAqua)
-        panel.delegate = self
-        panel.keyEventHandler = { [weak self] event in
-            self?.handlePanelKeyEvent(event) ?? false
-        }
+    private func configureContent() {
+        let container = contentView
 
-        let container = NSView()
-        container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor(calibratedWhite: 0.12, alpha: 1).cgColor
-        container.layer?.cornerRadius = 8
-        container.layer?.masksToBounds = true
-        panel.contentView = container
-
-        searchField.translatesAutoresizingMaskIntoConstraints = false
+        header.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
         stackView.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(searchField)
-        container.addSubview(stackView)
+        listContainer.translatesAutoresizingMaskIntoConstraints = false
+
+        // The panel no longer grows with its rows, so the list scrolls.
+        scrollView.documentView = listContainer
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.horizontalScrollElasticity = .none
+        scrollView.borderType = .noBorder
+        listContainer.addSubview(stackView)
+
+        container.addSubview(header)
+        container.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
-            searchField.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.topPadding),
-            searchField.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.horizontalPadding),
-            searchField.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Metrics.horizontalPadding),
-            searchField.heightAnchor.constraint(equalToConstant: Metrics.searchHeight),
+            header.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.topPadding),
+            header.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: container.trailingAnchor),
 
-            stackView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: Metrics.resultTopSpacing),
-            stackView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.horizontalPadding),
-            stackView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Metrics.horizontalPadding),
+            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Metrics.resultTopSpacing),
+            scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.horizontalPadding),
+            scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Metrics.horizontalPadding),
+            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Metrics.resultBottomPadding),
+
+            listContainer.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
+
+            stackView.topAnchor.constraint(equalTo: listContainer.topAnchor),
+            stackView.leadingAnchor.constraint(equalTo: listContainer.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: listContainer.trailingAnchor),
+            stackView.bottomAnchor.constraint(equalTo: listContainer.bottomAnchor),
         ])
     }
 
     private func configureSearchField() {
-        searchField.placeholderString = "Command"
         searchField.delegate = self
-        searchField.font = NSFont.systemFont(ofSize: Metrics.searchFontSize)
-        searchField.cell?.font = searchField.font
-        searchField.textColor = .labelColor
-        searchField.backgroundColor = NSColor(calibratedWhite: 0.14, alpha: 1)
-        searchField.drawsBackground = true
-        searchField.isBezeled = true
-        searchField.bezelStyle = .roundedBezel
-        searchField.focusRingType = .none
         searchField.keyHandler = { [weak self] event in
             self?.handleKeyDown(event) ?? false
+        }
+        updateHeader()
+    }
+
+    /// The header names what is on screen: Command at the root, or the group
+    /// you stepped into, such as Time.
+    private func updateHeader() {
+        guard let listTitle else {
+            header.update(title: "Command", symbolName: "command")
+            return
+        }
+
+        header.update(title: listTitle, symbolName: listSymbolName ?? "square.grid.2x2")
+    }
+
+    static func symbolName(for entry: CommandEntry) -> String {
+        switch entry.id {
+        case "time":
+            return "clock"
+        case "clipboard.history":
+            return "doc.on.clipboard"
+        case "window":
+            return "macwindow"
+        default:
+            return "square.grid.2x2"
         }
     }
 
@@ -179,76 +238,169 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
         stackView.spacing = Metrics.rowSpacing
     }
 
-    private func updateResults() {
-        entries = CommandTransformerEngine.evaluate(searchField.stringValue)
-        rowHeights = entries.map {
-            CommandPaletteResultRowView.height(for: $0, width: Metrics.panelWidth - Metrics.horizontalPadding * 2)
+    private func updateResults(resetSelection: Bool = true) {
+        let query = searchField.stringValue
+
+        if let listEntries {
+            entries = CommandCatalog.entries(in: listEntries, query: query)
+        } else {
+            entries = CommandCatalog.rootEntries(
+                query: query,
+                settings: settings,
+                history: history,
+                keepAwake: keepAwake
+            )
         }
 
+        if resetSelection || !entries.indices.contains(selectedIndex) {
+            selectedIndex = 0
+        }
+
+        rowHeights = entries.map {
+            CommandPaletteEntryRowView.height(for: $0, width: Metrics.panelWidth - Metrics.horizontalPadding * 2)
+        }
+
+        renderRows()
+        resizePanel()
+    }
+
+    private func renderRows() {
         for view in stackView.arrangedSubviews {
             stackView.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
 
-        for (entry, rowHeight) in zip(entries, rowHeights) {
-            let row = CommandPaletteResultRowView(evaluation: entry)
+        let detailColumnWidth = CommandPaletteEntryRowView.detailColumnWidth(for: entries)
+
+        for (index, pair) in zip(entries, rowHeights).enumerated() {
+            let row = CommandPaletteEntryRowView(
+                entry: pair.0,
+                isSelected: index == selectedIndex,
+                detailColumnWidth: detailColumnWidth
+            )
             row.translatesAutoresizingMaskIntoConstraints = false
             stackView.addArrangedSubview(row)
             NSLayoutConstraint.activate([
                 row.widthAnchor.constraint(equalTo: stackView.widthAnchor),
-                row.heightAnchor.constraint(equalToConstant: rowHeight),
+                row.heightAnchor.constraint(equalToConstant: pair.1),
             ])
         }
-
-        resizePanel()
-        positionPanel()
     }
 
-    private func resizePanel() {
-        let rowsHeight = rowHeights.reduce(CGFloat(0), +) + CGFloat(max(0, rowHeights.count - 1)) * Metrics.rowSpacing
-        let resultsHeight = entries.isEmpty
-            ? 0
-            : Metrics.resultTopSpacing + rowsHeight
-        let bottomPadding = entries.isEmpty ? Metrics.emptyBottomPadding : Metrics.resultBottomPadding
-        let panelHeight = Metrics.topPadding + Metrics.searchHeight + resultsHeight + bottomPadding
-
-        panel.setContentSize(NSSize(width: Metrics.panelWidth, height: panelHeight))
-        panel.contentView?.layoutSubtreeIfNeeded()
-    }
-
-    private func positionPanel() {
-        let mouseLocation = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) }
-            ?? NSScreen.main
-            ?? NSScreen.screens.first
-
-        guard let screen else {
+    private func moveSelection(by offset: Int) {
+        guard !entries.isEmpty else {
             return
         }
 
-        let visibleFrame = screen.visibleFrame
-        let frame = panel.frame
-        let topY = visibleFrame.maxY - visibleFrame.height * Metrics.topOffsetRatio
-
-        panel.setFrameOrigin(
-            NSPoint(
-                x: visibleFrame.midX - frame.width / 2,
-                y: max(visibleFrame.minY + Metrics.bottomMargin, topY - frame.height)
-            )
-        )
+        let count = entries.count
+        selectedIndex = ((selectedIndex + offset) % count + count) % count
+        renderRows()
+        contentView.layoutSubtreeIfNeeded()
+        scrollSelectionIntoView()
     }
 
-    private func copyFirstCompleteResult() {
-        guard let result = entries.first(where: \.isComplete)?.resultText else {
+    /// Runs the selected entry, or opens it when it is a group.
+    private func activateSelection() {
+        guard entries.indices.contains(selectedIndex) else {
             NSSound.beep()
             return
         }
 
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(result, forType: .string)
+        let entry = entries[selectedIndex]
+
+        if let destination = entry.destination {
+            // Coming back should land here, not at the top of the list.
+            selectedEntryIDBeforePush = entry.id
+            open(destination, from: entry)
+            return
+        }
+
+        guard let action = entry.action else {
+            NSSound.beep()
+            return
+        }
+
         hide()
+        actionHandler?(action)
     }
+
+    /// Remembers what was selected while a child list is open, so coming back
+    /// lands on the entry you left from rather than the top of the list.
+    private var selectedEntryIDBeforePush: String?
+
+    private func restoreSelectionAfterReturn() {
+        guard let id = selectedEntryIDBeforePush else {
+            return
+        }
+
+        selectedEntryIDBeforePush = nil
+
+        guard let index = entries.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        selectedIndex = index
+        renderRows()
+        contentView.layoutSubtreeIfNeeded()
+        scrollSelectionIntoView()
+    }
+
+    /// Both kinds of destination push onto the box's stack, so going back is
+    /// one rule. A list is rendered here; a view comes from the app.
+    private func open(_ destination: CommandDestination, from entry: CommandEntry) {
+        switch destination {
+        case let .list(entries):
+            let list = CommandPalettePanelController(
+                box: box,
+                listEntries: entries,
+                title: entry.title,
+                symbolName: Self.symbolName(for: entry)
+            )
+            list.settings = settings
+            list.history = history
+            list.actionHandler = actionHandler
+            list.pickerRequestHandler = pickerRequestHandler
+            list.viewProvider = viewProvider
+            box.push(list)
+
+        case let .view(kind):
+            guard let content = viewProvider?(kind) else {
+                NSSound.beep()
+                return
+            }
+
+            box.push(content)
+        }
+    }
+
+    private func resizePanel() {
+        contentView.layoutSubtreeIfNeeded()
+    }
+
+    /// Keeps the selected row on screen once the list is taller than the panel.
+    private func scrollSelectionIntoView() {
+        guard entries.indices.contains(selectedIndex) else {
+            return
+        }
+
+        let rowTop = rowHeights.prefix(selectedIndex).reduce(CGFloat(0), +)
+            + CGFloat(selectedIndex) * Metrics.rowSpacing
+        let rowBottom = rowTop + rowHeights[selectedIndex]
+        let viewport = scrollView.contentView.bounds
+        var offset = viewport.origin.y
+
+        if rowTop < offset {
+            offset = rowTop
+        } else if rowBottom > offset + viewport.height {
+            offset = rowBottom - viewport.height
+        }
+
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: max(0, offset)))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+
+
 
     private func handleKeyDown(_ event: NSEvent) -> Bool {
         if handleCommandKey(event) {
@@ -257,11 +409,40 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
 
         switch UInt32(event.keyCode) {
         case UInt32(kVK_Escape):
-            hide()
-            return true
+            // The box handles escape.
+            return false
 
         case UInt32(kVK_Return), UInt32(kVK_ANSI_KeypadEnter):
-            copyFirstCompleteResult()
+            activateSelection()
+            return true
+
+        case UInt32(kVK_UpArrow):
+            moveSelection(by: -1)
+            return true
+
+        case UInt32(kVK_DownArrow):
+            moveSelection(by: 1)
+            return true
+
+        case UInt32(kVK_RightArrow):
+            // Anything that goes somewhere opens with right, groups and the
+            // clipboard picker alike. With text to the right of the caret the
+            // key belongs to the search field.
+            guard entries.indices.contains(selectedIndex),
+                  entries[selectedIndex].navigates,
+                  caretIsAtEndOfQuery else {
+                return false
+            }
+
+            activateSelection()
+            return true
+
+        case UInt32(kVK_LeftArrow):
+            guard box.depth > 1 else {
+                return false
+            }
+
+            box.pop()
             return true
 
         default:
@@ -329,7 +510,7 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
 
         pendingInsertionRange = selectedRange()
         isPresentingNestedPicker = true
-        panel.orderOut(nil)
+        box.suppressesResignKey = true
         pickerRequestHandler(kind)
     }
 
@@ -346,6 +527,11 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
             selectionRangeAfterRefocus = newSelectionRange
         }
         setSelectedRange(newSelectionRange)
+    }
+
+    private var caretIsAtEndOfQuery: Bool {
+        let range = selectedRange()
+        return range.location + range.length >= (searchField.stringValue as NSString).length
     }
 
     private func selectedRange() -> NSRange {
@@ -371,12 +557,9 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
 
     private func refocusAfterNestedPicker() {
         isPresentingNestedPicker = false
+        box.suppressesResignKey = false
         resizePanel()
-        positionPanel()
-        NSApp.activate(ignoringOtherApps: true)
-        panel.orderFrontRegardless()
-        panel.makeKeyAndOrderFront(nil)
-        panel.makeFirstResponder(searchField)
+        box.pop()
         if let selectionRangeAfterRefocus {
             setSelectedRange(selectionRangeAfterRefocus)
             self.selectionRangeAfterRefocus = nil
@@ -393,139 +576,131 @@ final class CommandPalettePanelController: NSObject, NSWindowDelegate, NSTextFie
 }
 
 @MainActor
-private final class CommandPaletteResultRowView: NSView {
+private final class CommandPaletteEntryRowView: NSView {
     private enum Metrics {
         static let horizontalPadding: CGFloat = 8
         static let topPadding: CGFloat = 6
-        static let valueTopSpacing: CGFloat = 4
+        static let detailTopSpacing: CGFloat = 4
+        static let detailSpacing: CGFloat = 12
         static let bottomPadding: CGFloat = 4
-        static let nameFontSize: CGFloat = 12
-        static let valueFontSize: CGFloat = 15
-        static let lineHeight: CGFloat = 19
+        static let titleFontSize: CGFloat = 13
+        static let detailFontSize: CGFloat = 12
+        static let lineHeight: CGFloat = 18
+        static let singleLineHeight: CGFloat = 26
+        static let cornerRadius: CGFloat = 6
     }
 
-    init(evaluation: CommandTransformerEvaluation) {
+    /// Widest single-line detail in the list, so every row reserves the same
+    /// column and the parts that vary, such as a UTC offset, line up.
+    static func detailColumnWidth(for entries: [CommandEntry]) -> CGFloat {
+        let widths = entries.compactMap { entry -> CGFloat? in
+            guard let detail = entry.detail, !detail.isEmpty, !isMultiline(detail) else {
+                return nil
+            }
+
+            return (detail as NSString).size(withAttributes: [.font: detailFont]).width
+        }
+
+        return widths.max() ?? 0
+    }
+
+    init(entry: CommandEntry, isSelected: Bool, detailColumnWidth: CGFloat = 0) {
         super.init(frame: .zero)
 
         wantsLayer = true
+        layer?.cornerRadius = Metrics.cornerRadius
+        layer?.backgroundColor = isSelected
+            ? NSColor(calibratedWhite: 1, alpha: 0.12).cgColor
+            : NSColor.clear.cgColor
 
-        let nameField = NSTextField(labelWithString: evaluation.transformerName)
-        nameField.font = Self.nameFont
-        nameField.textColor = .secondaryLabelColor
-        nameField.lineBreakMode = .byTruncatingTail
-        nameField.translatesAutoresizingMaskIntoConstraints = false
-
-        let valueField = NSTextField(labelWithAttributedString: Self.valueString(for: evaluation))
-        valueField.font = Self.valueFont
-        valueField.lineBreakMode = .byTruncatingTail
-        valueField.maximumNumberOfLines = 0
-        valueField.usesSingleLineMode = false
-        valueField.isSelectable = true
-        valueField.isEditable = false
-        valueField.isBordered = false
-        valueField.drawsBackground = false
-        valueField.translatesAutoresizingMaskIntoConstraints = false
-
-        addSubview(nameField)
-        addSubview(valueField)
+        let titleField = NSTextField(labelWithString: entry.navigates ? "\(entry.title) ›" : entry.title)
+        titleField.font = Self.titleFont
+        titleField.textColor = isSelected ? .labelColor : .secondaryLabelColor
+        titleField.lineBreakMode = .byTruncatingTail
+        titleField.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(titleField)
 
         NSLayoutConstraint.activate([
-            nameField.topAnchor.constraint(equalTo: topAnchor, constant: Metrics.topPadding),
-            nameField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
-            nameField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
+            titleField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
+        ])
 
-            valueField.topAnchor.constraint(equalTo: nameField.bottomAnchor, constant: Metrics.valueTopSpacing),
-            valueField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
-            valueField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
-            valueField.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -Metrics.bottomPadding),
+        guard let detail = entry.detail, !detail.isEmpty else {
+            titleField.topAnchor.constraint(equalTo: topAnchor, constant: Metrics.topPadding).isActive = true
+            titleField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding).isActive = true
+            return
+        }
+
+        let detailField = NSTextField(labelWithString: detail)
+        detailField.font = Self.detailFont
+        detailField.textColor = .secondaryLabelColor
+        detailField.lineBreakMode = .byTruncatingTail
+        detailField.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(detailField)
+
+        // One-line details sit beside the title, which keeps lists such as the
+        // time zones compact. Only multi-line results need their own block.
+        guard Self.isMultiline(detail) else {
+            // Left aligned inside a fixed column: right aligning each label
+            // separately is what left the clocks ragged, since the offset
+            // after them differs in width.
+            detailField.alignment = .left
+            detailField.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+
+            NSLayoutConstraint.activate([
+                titleField.centerYAnchor.constraint(equalTo: centerYAnchor),
+                detailField.centerYAnchor.constraint(equalTo: centerYAnchor),
+                detailField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
+                detailField.widthAnchor.constraint(equalToConstant: ceil(detailColumnWidth)),
+                detailField.leadingAnchor.constraint(
+                    greaterThanOrEqualTo: titleField.trailingAnchor,
+                    constant: Metrics.detailSpacing
+                ),
+            ])
+            return
+        }
+
+        detailField.maximumNumberOfLines = 0
+        detailField.usesSingleLineMode = false
+
+        NSLayoutConstraint.activate([
+            titleField.topAnchor.constraint(equalTo: topAnchor, constant: Metrics.topPadding),
+            titleField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
+            detailField.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: Metrics.detailTopSpacing),
+            detailField.leadingAnchor.constraint(equalTo: titleField.leadingAnchor),
+            detailField.trailingAnchor.constraint(equalTo: titleField.trailingAnchor),
         ])
     }
 
-    @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        nil
     }
 
-    static func height(for evaluation: CommandTransformerEvaluation, width: CGFloat) -> CGFloat {
-        let value = evaluation.resultText ?? evaluation.displayText
-        let lineCount = max(1, value.components(separatedBy: .newlines).count)
-        return Metrics.topPadding +
-            ceil(Self.nameFont.ascender - Self.nameFont.descender + Self.nameFont.leading) +
-            Metrics.valueTopSpacing +
-            CGFloat(lineCount) * Metrics.lineHeight +
-            Metrics.bottomPadding
-    }
-
-    private static func valueString(for evaluation: CommandTransformerEvaluation) -> NSAttributedString {
-        if let resultText = evaluation.resultText {
-            return NSAttributedString(
-                string: resultText,
-                attributes: [
-                    .font: Self.valueFont,
-                    .foregroundColor: NSColor.labelColor,
-                ]
-            )
+    static func height(for entry: CommandEntry, width: CGFloat) -> CGFloat {
+        guard let detail = entry.detail, isMultiline(detail) else {
+            return Metrics.singleLineHeight
         }
 
-        let attributed = NSMutableAttributedString()
-        for segment in evaluation.segments {
-            attributed.append(
-                NSAttributedString(
-                    string: segment.text,
-                    attributes: [
-                        .font: Self.valueFont,
-                        .foregroundColor: color(for: segment.kind),
-                    ]
-                )
-            )
-        }
+        let lines = max(1, detail.split(separator: "\n", omittingEmptySubsequences: false).count)
 
-        return attributed
+        return Metrics.topPadding
+            + Metrics.lineHeight
+            + Metrics.detailTopSpacing
+            + CGFloat(lines) * Metrics.lineHeight
+            + Metrics.bottomPadding
     }
 
-    private static func color(for kind: CommandDisplaySegmentKind) -> NSColor {
-        switch kind {
-        case .matched:
-            return .labelColor
-        case .placeholder:
-            return .secondaryLabelColor
-        }
+    private static func isMultiline(_ detail: String) -> Bool {
+        detail.contains("\n")
     }
 
-    private static let nameFont = NSFont.systemFont(ofSize: Metrics.nameFontSize, weight: .medium)
-    private static let valueFont = NSFont.monospacedSystemFont(ofSize: Metrics.valueFontSize, weight: .regular)
+    private static let titleFont = NSFont.systemFont(ofSize: Metrics.titleFontSize, weight: .regular)
+    private static let detailFont = NSFont.monospacedSystemFont(ofSize: Metrics.detailFontSize, weight: .regular)
 }
 
-@MainActor
-private final class CommandPalettePanelWindow: NSPanel {
-    var keyEventHandler: ((NSEvent) -> Bool)?
 
-    override var canBecomeKey: Bool {
+/// Flipped, so the list fills from the top of the scroll view.
+private final class CommandPaletteListContainerView: NSView {
+    override var isFlipped: Bool {
         true
-    }
-
-    override var canBecomeMain: Bool {
-        true
-    }
-
-    override func sendEvent(_ event: NSEvent) {
-        if keyEventHandler?(event) == true {
-            return
-        }
-
-        super.sendEvent(event)
-    }
-}
-
-@MainActor
-private final class CommandPaletteTextField: NSTextField {
-    var keyHandler: ((NSEvent) -> Bool)?
-
-    override func keyDown(with event: NSEvent) {
-        if keyHandler?(event) == true {
-            return
-        }
-
-        super.keyDown(with: event)
     }
 }

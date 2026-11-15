@@ -11,10 +11,14 @@ public final class ShortyController {
     public var statusHandler: StatusHandler?
     public var clipboardMenuHandler: ((ClipboardMenuKind) -> Void)?
     public var textCommandHandler: (() -> Void)?
+    public var commandBoxSettingsHandler: ((CommandBoxSettings) -> Void)?
     public var windowSwitcherHandler: ((WindowSwitcherUpdate) -> Void)?
     public var permissionRequestHandler: ((ShortyPermissionPane) -> Void)?
     public private(set) var loadedShortcuts: [LoadedShortcut] = []
     public private(set) var loadedSnippetGroups: [SnippetGroup] = []
+    public private(set) var loadedBindings: HotKeyBindings = .default
+    public private(set) var loadedCommandBox: CommandBoxSettings = .default
+    private var numpadAliases = NumpadAliasResolver(claimedHotKeys: [])
 
     private let console: Console
     private let hotKeyCenter: HotKeyCenter
@@ -24,6 +28,7 @@ public final class ShortyController {
     private let clipboardMonitor: ClipboardMonitor
     private let clipboardPaster: ClipboardPaster
     private let windowSwitchingIndex: WindowSwitchingIndex
+    private let keepAwake = KeepAwake()
     private lazy var windowSwitcherEventTap = WindowSwitcherEventTap { [weak self] event in
         self?.handleWindowSwitcherEvent(event)
     }
@@ -32,7 +37,7 @@ public final class ShortyController {
     private var activeWindowSwitcherWindows: [SwitchableWindow] = []
     private var activeWindowSwitcherSelection: WindowSwitcherSessionState?
     private var requestedPermissionPanes: Set<ShortyPermissionPane> = []
-    private var lastWindowMoveAction: (hotKey: String, date: Date)?
+    private var didCompleteStart = false
 
     public init(
         options: LaunchOptions,
@@ -64,15 +69,16 @@ public final class ShortyController {
             requestPermissionPane(.accessibility)
         }
 
-        registerReservedHotKeys()
-        clipboardMonitor.start()
-        windowSwitchingIndex.start()
-        startWindowSwitcherEventTap()
         reloadConfig(reason: "startup")
+        startClipboardCapture()
+        startWindowSwitching()
+        registerBuiltInHotKeys()
+        didCompleteStart = true
         startWatchingConfig()
     }
 
     public func stop() {
+        keepAwake.stop()
         configWatcher?.stop()
         clipboardMonitor.stop()
         windowSwitchingIndex.stop()
@@ -88,6 +94,15 @@ public final class ShortyController {
             windowSwitchingIndex.replaceShortcuts(configuration.shortcuts)
             loadedShortcuts = configuration.shortcuts
             loadedSnippetGroups = configuration.snippetGroups
+
+            let previousBindings = loadedBindings
+            loadedBindings = configuration.bindings
+            numpadAliases = configuration.numpadAliases
+            loadedCommandBox = configuration.commandBox
+            commandBoxSettingsHandler?(loadedCommandBox)
+            if didCompleteStart, loadedBindings != previousBindings {
+                applyBindings(changedFrom: previousBindings)
+            }
 
             let snippetCount = configuration.snippetGroups.reduce(0) { $0 + $1.snippets.count }
             let message = "Loaded \(configuration.shortcuts.count) shortcut(s) and \(snippetCount) snippet(s) from \(options.configURL.path)."
@@ -140,51 +155,147 @@ public final class ShortyController {
         clipboardPaster.pasteText(text)
     }
 
+    @discardableResult
+    public func deleteClipboardItem(_ item: ClipboardItem) -> Bool {
+        console.info("Removing clipboard history item.")
+        return clipboardHistoryStore.remove(id: item.id)
+    }
+
+    public var isKeepAwakeActive: Bool {
+        keepAwake.isActive
+    }
+
+    public func setKeepAwake(_ active: Bool) {
+        keepAwake.set(active)
+        let message = active ? "Keeping the Mac awake." : "Letting the Mac sleep again."
+        console.info(message)
+        publishStatus(message)
+    }
+
+    public func copyClipboardItem(_ item: ClipboardItem) {
+        console.info("Copying clipboard history item without pasting.")
+        clipboardHistoryStore.add(item)
+        clipboardPaster.copyToPasteboard(item)
+    }
+
+    public func copySnippet(_ snippet: Snippet) {
+        console.info("Copying snippet without pasting.")
+        clipboardHistoryStore.addPlainText(snippet.content)
+        clipboardPaster.copyTextToPasteboard(snippet.content)
+    }
+
     public func pasteSnippet(_ snippet: Snippet) {
         clipboardHistoryStore.addPlainText(snippet.content)
         clipboardPaster.pasteText(snippet.content)
     }
 
-    private func registerReservedHotKeys() {
+    private func registerBuiltInHotKeys() {
+        var actions: [HotKeyAction] = []
+
+        func append(_ hotKey: KeyCombo?, handler: @escaping () -> Void) {
+            guard let hotKey else {
+                return
+            }
+
+            actions.append(HotKeyAction(hotKey: hotKey, handler: handler))
+
+            if let alias = numpadAliases.alias(for: hotKey) {
+                actions.append(HotKeyAction(hotKey: alias, isOptional: true, handler: handler))
+            }
+        }
+
+        append(loadedBindings.clipboardMenu) { [weak self] in
+            self?.console.info("Hotkey for clipboard menu triggered.")
+            self?.clipboardMenuHandler?(.combined)
+        }
+
+        append(loadedBindings.snippetsMenu) { [weak self] in
+            self?.console.info("Hotkey for snippets menu triggered.")
+            self?.clipboardMenuHandler?(.snippets)
+        }
+
+        append(loadedBindings.commandBox) { [weak self] in
+            self?.console.info("Hotkey for command box triggered.")
+            self?.textCommandHandler?()
+        }
+
+        let moveBindings: [(KeyCombo?, WindowMoveCommand)] = [
+            (loadedBindings.moveWindowLeftHalf, .cycleHalf(.left)),
+            (loadedBindings.moveWindowRightHalf, .cycleHalf(.right)),
+            (loadedBindings.maximizeWindow, .maximize),
+            (loadedBindings.moveWindowToLeftMonitor, .moveToMonitor(.left)),
+            (loadedBindings.moveWindowToRightMonitor, .moveToMonitor(.right)),
+        ]
+
+        for (hotKey, command) in moveBindings {
+            guard let hotKey else {
+                continue
+            }
+
+            append(hotKey) { [weak self] in
+                self?.moveFocusedWindow(command, hotKey: hotKey.normalizedValue)
+            }
+        }
+
         do {
-            try hotKeyCenter.replaceActions(with: [
-                HotKeyAction(hotKey: ReservedHotKeys.clipboardMenu) { [weak self] in
-                    self?.console.info("Reserved hotkey `\(ReservedHotKeys.clipboardMenu.normalizedValue)` triggered clipboard menu.")
-                    self?.clipboardMenuHandler?(.combined)
-                },
-                HotKeyAction(hotKey: ReservedHotKeys.snippetsMenu) { [weak self] in
-                    self?.console.info("Reserved hotkey `\(ReservedHotKeys.snippetsMenu.normalizedValue)` triggered snippets menu.")
-                    self?.clipboardMenuHandler?(.snippets)
-                },
-                HotKeyAction(hotKey: ReservedHotKeys.textCommand) { [weak self] in
-                    self?.console.info("Reserved hotkey `\(ReservedHotKeys.textCommand.normalizedValue)` triggered text command palette.")
-                    self?.textCommandHandler?()
-                },
-                HotKeyAction(hotKey: ReservedHotKeys.moveWindowLeftHalf) { [weak self] in
-                    self?.moveFocusedWindow(.cycleHalf(.left), hotKey: ReservedHotKeys.moveWindowLeftHalf.normalizedValue)
-                },
-                HotKeyAction(hotKey: ReservedHotKeys.moveWindowRightHalf) { [weak self] in
-                    self?.moveFocusedWindow(.cycleHalf(.right), hotKey: ReservedHotKeys.moveWindowRightHalf.normalizedValue)
-                },
-                HotKeyAction(hotKey: ReservedHotKeys.maximizeWindow) { [weak self] in
-                    self?.moveFocusedWindow(.maximize, hotKey: ReservedHotKeys.maximizeWindow.normalizedValue)
-                },
-                HotKeyAction(hotKey: ReservedHotKeys.moveWindowToLeftMonitor) { [weak self] in
-                    self?.moveFocusedWindow(.moveToMonitor(.left), hotKey: ReservedHotKeys.moveWindowToLeftMonitor.normalizedValue)
-                },
-                HotKeyAction(hotKey: ReservedHotKeys.moveWindowToRightMonitor) { [weak self] in
-                    self?.moveFocusedWindow(.moveToMonitor(.right), hotKey: ReservedHotKeys.moveWindowToRightMonitor.normalizedValue)
-                },
-            ])
-            console.info("Registered Carbon reserved hotkeys: \(Self.carbonReservedHotKeySummary()).")
+            try hotKeyCenter.replaceActions(with: actions)
+            console.info("Registered built-in hotkeys: \(builtInHotKeySummary()).")
         } catch {
-            let message = "Reserved hotkey registration failed: \(error)"
+            let message = "Built-in hotkey registration failed: \(error)"
             console.error(message)
             publishStatus(message)
         }
     }
 
+    private func startClipboardCapture() {
+        guard loadedBindings.clipboardCaptureEnabled else {
+            console.info("No clipboard hotkey bound. Clipboard history stays off.")
+            return
+        }
+
+        clipboardMonitor.start()
+    }
+
+    private func startWindowSwitching() {
+        guard loadedBindings.windowSwitcherEnabled else {
+            console.info("No window switcher hotkey bound. Its keys stay with macOS.")
+            return
+        }
+
+        windowSwitchingIndex.start()
+        startWindowSwitcherEventTap()
+    }
+
+    private func stopWindowSwitching() {
+        cancelWindowSwitcher()
+        windowSwitcherEventTap.stop()
+        windowSwitchingIndex.stop()
+    }
+
+    private func applyBindings(changedFrom previous: HotKeyBindings) {
+        registerBuiltInHotKeys()
+
+        if previous.clipboardCaptureEnabled != loadedBindings.clipboardCaptureEnabled {
+            if loadedBindings.clipboardCaptureEnabled {
+                startClipboardCapture()
+            } else {
+                clipboardMonitor.stop()
+                console.info("No clipboard hotkey bound. Clipboard history stays off.")
+            }
+        }
+
+        if loadedBindings.windowSwitcherEnabled {
+            startWindowSwitching()
+        } else if previous.windowSwitcherEnabled {
+            stopWindowSwitching()
+            console.info("No window switcher hotkey bound. Its keys stay with macOS.")
+        }
+    }
+
     private func startWindowSwitcherEventTap() {
+        windowSwitcherEventTap.allWindowsHotKey = loadedBindings.switcherAllWindows
+        windowSwitcherEventTap.currentApplicationHotKey = loadedBindings.switcherCurrentApp
+
         guard windowSwitcherEventTap.start() else {
             let message = "Window switcher unavailable. Allow Accessibility for Shorty, then restart."
             console.error(message)
@@ -206,8 +317,6 @@ public final class ShortyController {
             advanceWindowSwitcher(mode: activeWindowSwitcherMode ?? .allWindows, direction: .reverse)
         case .reverseCurrentApplication:
             advanceWindowSwitcher(mode: .currentApplication, direction: .reverse)
-        case let .moveFocusedWindow(command, hotKey):
-            moveFocusedWindow(command, hotKey: hotKey)
         case .commandReleased:
             commitWindowSwitcher()
         case .cancel:
@@ -215,16 +324,13 @@ public final class ShortyController {
         }
     }
 
-    private func moveFocusedWindow(_ command: WindowMoveCommand, hotKey: String) {
-        let now = Date()
-        if let lastWindowMoveAction,
-           lastWindowMoveAction.hotKey == hotKey,
-           now.timeIntervalSince(lastWindowMoveAction.date) < 0.08 {
-            return
-        }
+    /// Window moves from somewhere other than a hotkey, such as the command box.
+    public func performWindowMove(_ command: WindowMoveCommand) {
+        moveFocusedWindow(command, hotKey: "command box")
+    }
 
-        lastWindowMoveAction = (hotKey, now)
-        console.info("Reserved hotkey `\(hotKey)` triggered window move action.")
+    private func moveFocusedWindow(_ command: WindowMoveCommand, hotKey: String) {
+        console.info("Hotkey `\(hotKey)` triggered window move action.")
         let result = windowMover.moveFocusedWindow(command)
         publishStatus(result.message)
     }
@@ -341,21 +447,20 @@ public final class ShortyController {
         permissionRequestHandler?(pane)
     }
 
-    private static func carbonReservedHotKeySummary() -> String {
-        [
-            ReservedHotKeys.clipboardMenu,
-            ReservedHotKeys.snippetsMenu,
-            ReservedHotKeys.textCommand,
-            ReservedHotKeys.moveWindowLeftHalf,
-            ReservedHotKeys.moveWindowRightHalf,
-            ReservedHotKeys.maximizeWindow,
-            ReservedHotKeys.moveWindowToLeftMonitor,
-            ReservedHotKeys.moveWindowToRightMonitor,
-        ]
-        .map { hotKey in
-            let description = ReservedHotKeys.descriptionsByNormalizedValue[hotKey.normalizedValue] ?? "reserved action"
-            return "\(hotKey.normalizedValue) (\(description))"
+    private func builtInHotKeySummary() -> String {
+        let bound = loadedBindings.boundActions
+        guard !bound.isEmpty else {
+            return "none"
         }
-        .joined(separator: ", ")
+
+        return bound
+            .map { action in
+                guard let alias = numpadAliases.alias(for: action.hotKey) else {
+                    return "\(action.hotKey.normalizedValue) (\(action.name))"
+                }
+
+                return "\(action.hotKey.normalizedValue) or \(alias.normalizedValue) (\(action.name))"
+            }
+            .joined(separator: ", ")
     }
 }

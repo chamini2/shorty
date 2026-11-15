@@ -134,6 +134,18 @@ public enum ClipboardPickerSearch {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         var entries: [ClipboardPickerEntry] = []
 
+        // Snippets sit above history: the picker opens on the newest history
+        // item, which puts snippets one `up` away.
+        let snippetEntries = rootEntriesMatching(
+            rootSnippetEntries(snippetGroups),
+            query: normalizedQuery
+        )
+
+        if !snippetEntries.isEmpty || normalizedQuery.isEmpty {
+            entries.append(.header("Snippets"))
+            entries.append(contentsOf: snippetEntries.isEmpty ? [.empty("No snippets configured")] : snippetEntries)
+        }
+
         if mode == .all {
             let historyEntries = rootEntriesMatching(
                 rootHistoryEntries(history),
@@ -144,16 +156,6 @@ public enum ClipboardPickerSearch {
                 entries.append(.header("History"))
                 entries.append(contentsOf: historyEntries.isEmpty ? [.empty("No clipboard history")] : historyEntries)
             }
-        }
-
-        let snippetEntries = rootEntriesMatching(
-            rootSnippetEntries(snippetGroups),
-            query: normalizedQuery
-        )
-
-        if !snippetEntries.isEmpty || normalizedQuery.isEmpty {
-            entries.append(.header("Snippets"))
-            entries.append(contentsOf: snippetEntries.isEmpty ? [.empty("No snippets configured")] : snippetEntries)
         }
 
         return entries.isEmpty ? [.empty("No matches")] : entries
@@ -183,7 +185,7 @@ public enum ClipboardPickerSearch {
         switch mode {
         case .all:
             historyResults = history
-                .filter { item in matches(normalizedQuery, in: [item.plainText]) }
+                .filter { item in matches(normalizedQuery, in: item.searchableText) }
                 .map { .history($0) }
         case .snippetsOnly:
             historyResults = []
@@ -203,37 +205,9 @@ public enum ClipboardPickerSearch {
     }
 
     private static func rootHistoryEntries(_ history: [ClipboardItem]) -> [ClipboardPickerEntry] {
-        let items = Array(history.prefix(ClipboardConstants.maxVisibleItems))
-        var entries = items
-            .prefix(ClipboardConstants.maxDirectMenuItems)
+        history
+            .prefix(ClipboardConstants.maxVisibleItems)
             .map { ClipboardPickerEntry.history($0) }
-
-        let overflowStart = ClipboardConstants.maxDirectMenuItems
-        guard items.count > overflowStart else {
-            return entries
-        }
-
-        let maxOverflowItems = ClipboardConstants.overflowSubmenuSize * ClipboardConstants.maxOverflowSubmenus
-        let overflowEnd = min(items.count, overflowStart + maxOverflowItems)
-        var rangeStart = overflowStart
-
-        while rangeStart < overflowEnd {
-            let rangeEnd = min(rangeStart + ClipboardConstants.overflowSubmenuSize, overflowEnd)
-            let folderEntries = items[rangeStart..<rangeEnd].map { ClipboardPickerEntry.history($0) }
-            entries.append(
-                .folder(
-                    ClipboardPickerFolder(
-                        id: "history:\(rangeStart):\(rangeEnd)",
-                        title: "\(rangeStart + 1) - \(rangeEnd)",
-                        kind: .history,
-                        entries: folderEntries
-                    )
-                )
-            )
-            rangeStart = rangeEnd
-        }
-
-        return entries
     }
 
     private static func rootSnippetEntries(_ snippetGroups: [SnippetGroup]) -> [ClipboardPickerEntry] {
@@ -297,7 +271,7 @@ public enum ClipboardPickerSearch {
             return matches(query, in: [folder.title]) ||
                 folder.entries.contains { matches($0, query: query) }
         case let .history(item):
-            return matches(query, in: [item.plainText])
+            return matches(query, in: item.searchableText)
         case let .snippet(groupTitle, snippet):
             return matches(query, in: [groupTitle, snippet.title, snippet.content])
         }
@@ -308,7 +282,7 @@ public enum ClipboardPickerSearch {
         case .header, .folder, .back, .empty:
             return false
         case let .history(item):
-            return matches(query, in: [item.plainText])
+            return matches(query, in: item.searchableText)
         case let .snippet(_, snippet):
             return matches(query, in: [snippet.title, snippet.content])
         }

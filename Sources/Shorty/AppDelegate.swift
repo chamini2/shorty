@@ -1,10 +1,9 @@
 import AppKit
 import Carbon
 import ShortyCore
-import UniformTypeIdentifiers
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private let controller: ShortyController
 
     private var statusItem: NSStatusItem?
@@ -15,23 +14,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let pathMenuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let shortcutsHeaderItem = NSMenuItem(title: "Shortcuts", action: nil, keyEquivalent: "")
     private let emptyShortcutsItem = NSMenuItem(title: "No shortcuts loaded", action: nil, keyEquivalent: "")
+    private let keepAwakeItem = NSMenuItem(title: "Keep the Mac Awake", action: nil, keyEquivalent: "")
     private var dynamicShortcutItems: [NSMenuItem] = []
-    private var popupClipboardMenu: NSMenu?
-    private var popupAnchorWindow: NSWindow?
-    private lazy var popupModifierTracker = PopupModifierTracker { [weak self] in
-        self?.pasteHighlightedClipboardItemAsPlainText() ?? false
-    }
-    private let clipboardPickerPanel = ClipboardPickerPanelController()
-    private let commandPalettePanel = CommandPalettePanelController()
+    let box = ShortyBoxController()
+    private lazy var clipboardPickerPanel = ClipboardPickerPanelController(box: box)
+    private var presentedPickerKind: ClipboardMenuKind?
+    private var commandPaletteTargetApplication: NSRunningApplication?
+    private lazy var commandPalettePanel = CommandPalettePanelController(box: box)
     private let windowSwitcherPanel = WindowSwitcherPanelController()
-    private lazy var historyMenuIcon = Self.menuIcon(NSWorkspace.shared.icon(for: UTType.plainText))
-    private lazy var snippetFolderMenuIcon: NSImage = {
-        if let folderIcon = NSImage(named: NSImage.folderName) {
-            return Self.menuIcon(folderIcon)
-        }
-
-        return Self.menuIcon(NSWorkspace.shared.icon(for: UTType.folder))
-    }()
 
     init(controller: ShortyController) {
         self.controller = controller
@@ -59,6 +49,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         commandPalettePanel.pickerRequestHandler = { [weak self] kind in
             self?.showCommandInsertionPicker(kind)
         }
+        controller.commandBoxSettingsHandler = { [weak self] settings in
+            DispatchQueue.main.async {
+                self?.commandPalettePanel.settings = settings
+            }
+        }
+        commandPalettePanel.viewProvider = { [weak self] kind in
+            guard let self else {
+                return nil
+            }
+
+            switch kind {
+            case let .clipboard(menuKind):
+                // Prepared but not presented: the box pushes it, which keeps
+                // escape popping back to the command list.
+                presentedPickerKind = menuKind
+                prepareClipboardPicker(
+                    menuKind,
+                    targetApplication: commandPaletteTargetApplication
+                )
+                return clipboardPickerPanel
+            }
+        }
+        commandPalettePanel.actionHandler = { [weak self] action in
+            DispatchQueue.main.async {
+                self?.performCommandAction(action)
+            }
+        }
         controller.windowSwitcherHandler = { [weak self] update in
             DispatchQueue.main.async {
                 self?.handleWindowSwitcherUpdate(update)
@@ -85,9 +102,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.statusItem = statusItem
 
         if let button = statusItem.button {
-            button.title = "S"
             button.toolTip = "Shorty"
+            button.imagePosition = .imageOnly
         }
+
+        updateKeepAwakeIndicator()
 
         stateMenuItem.isEnabled = false
         pathMenuItem.isEnabled = false
@@ -100,6 +119,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(shortcutsHeaderItem)
         menu.addItem(emptyShortcutsItem)
+        menu.addItem(.separator())
+
+        keepAwakeItem.action = #selector(toggleKeepAwake)
+        keepAwakeItem.target = self
+        menu.addItem(keepAwakeItem)
         menu.addItem(.separator())
 
         let windowsItem = NSMenuItem(
@@ -219,7 +243,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSWorkspace.shared.open(url)
     }
 
+    private func performCommandAction(_ action: CommandAction) {
+        switch action {
+        case let .copyText(text):
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+
+        case let .moveWindow(command):
+            controller.performWindowMove(command)
+
+        case let .setKeepAwake(active):
+            controller.setKeepAwake(active)
+            updateKeepAwakeIndicator()
+
+        }
+    }
+
+    @objc
+    private func toggleKeepAwake() {
+        controller.setKeepAwake(!controller.isKeepAwakeActive)
+        updateKeepAwakeIndicator()
+    }
+
+    /// The menu bar cup fills while sleep is held off and empties when it is
+    /// not, which says the same thing as the tick in the menu below it.
+    private func updateKeepAwakeIndicator() {
+        let active = controller.isKeepAwakeActive
+        keepAwakeItem.state = active ? .on : .off
+
+        guard let button = statusItem?.button else {
+            return
+        }
+
+        let image = NSImage(
+            systemSymbolName: active ? "cup.and.saucer.fill" : "cup.and.saucer",
+            accessibilityDescription: active ? "Shorty, keeping the Mac awake" : "Shorty"
+        )
+        image?.isTemplate = true
+        button.image = image
+    }
+
     private func showCommandPalette() {
+        // The same hotkey closes it again.
+        if commandPalettePanel.isPresented {
+            commandPalettePanel.hide()
+            return
+        }
+
+        // Captured before the box takes focus, so a paste lands where it was.
+        commandPaletteTargetApplication = Self.currentPasteTargetApplication()
+        commandPalettePanel.history = controller.recentClipboardItems()
+        commandPalettePanel.keepAwake = controller.isKeepAwakeActive
         commandPalettePanel.show()
     }
 
@@ -228,6 +303,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
+        // The same hotkey closes the picker; the other one switches to it.
+        if clipboardPickerPanel.isPresented {
+            clipboardPickerPanel.hide()
+
+            if presentedPickerKind == kind {
+                presentedPickerKind = nil
+                return
+            }
+        }
+
+        presentedPickerKind = kind
         showClipboardPicker(kind)
     }
 
@@ -350,31 +436,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pasteboard.setString(text, forType: .string)
     }
 
-    private func showClipboardMenu(_ kind: ClipboardMenuKind) {
-        guard popupClipboardMenu == nil else {
-            return
-        }
-
-        let popupMenu = NSMenu(title: "Shorty")
-        popupMenu.autoenablesItems = false
-        popupMenu.delegate = self
-
-        switch kind {
-        case .combined:
-            addHistoryItems(to: popupMenu)
-            popupMenu.addItem(.separator())
-            addSnippetItems(to: popupMenu, includeEmptyItem: true)
-        case .snippets:
-            addSnippetItems(to: popupMenu, includeEmptyItem: true)
-        }
-
-        popupClipboardMenu = popupMenu
-        popupModifierTracker.start()
-        let anchorView = makePopupAnchorView(at: NSEvent.mouseLocation)
-        popupMenu.popUp(positioning: Self.firstSelectableItem(in: popupMenu), at: .zero, in: anchorView)
+    private func showClipboardPicker(_ kind: ClipboardMenuKind) {
+        prepareClipboardPicker(kind)
+        box.open(clipboardPickerPanel)
     }
 
-    private func showClipboardPicker(_ kind: ClipboardMenuKind) {
+    /// Fills the picker in without showing it, so either the hotkey or the
+    /// command box can decide how it appears.
+    private func prepareClipboardPicker(
+        _ kind: ClipboardMenuKind,
+        targetApplication capturedTarget: NSRunningApplication? = nil
+    ) {
         let mode: ClipboardPickerMode
         switch kind {
         case .combined:
@@ -383,7 +455,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             mode = .snippetsOnly
         }
 
-        let targetApplication = Self.currentPasteTargetApplication()
+        let targetApplication = capturedTarget ?? Self.currentPasteTargetApplication()
         clipboardPickerPanel.show(
             mode: mode,
             history: controller.recentClipboardItems(),
@@ -397,6 +469,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             },
             onCancel: {
                 Self.reactivate(targetApplication)
+            },
+            onDelete: { [weak self] item in
+                self?.controller.deleteClipboardItem(item)
             }
         )
     }
@@ -420,11 +495,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     controller.pasteClipboardItemByJoiningTrimmedNonEmptyLines(item)
                 case .plainText:
                     controller.pasteClipboardItemAsPlainText(item)
+                case .copyOnly:
+                    controller.copyClipboardItem(item)
                 case .standard:
                     controller.pasteClipboardItem(item)
                 }
             case let .snippet(_, snippet):
-                controller.pasteSnippet(snippet)
+                if activationMode == .copyOnly {
+                    controller.copySnippet(snippet)
+                } else {
+                    controller.pasteSnippet(snippet)
+                }
             }
         }
     }
@@ -452,246 +533,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .hide:
             windowSwitcherPanel.hide()
         }
-    }
-
-    func menuDidClose(_ menu: NSMenu) {
-        if menu === popupClipboardMenu {
-            popupAnchorWindow?.orderOut(nil)
-            popupAnchorWindow = nil
-            popupClipboardMenu = nil
-            popupModifierTracker.stop()
-        }
-    }
-
-    private func makePopupAnchorView(at point: NSPoint) -> NSView {
-        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
-        let window = NSWindow(
-            contentRect: NSRect(x: point.x, y: point.y, width: 1, height: 1),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        window.backgroundColor = .clear
-        window.isOpaque = false
-        window.hasShadow = false
-        window.ignoresMouseEvents = true
-        window.level = .popUpMenu
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-        window.contentView = contentView
-        window.orderFrontRegardless()
-        popupAnchorWindow = window
-        return contentView
-    }
-
-    private func addHistoryItems(to menu: NSMenu) {
-        addDisabledHeader("History", to: menu)
-
-        let items = controller.recentClipboardItems()
-        guard !items.isEmpty else {
-            let emptyItem = NSMenuItem(title: "No clipboard history", action: nil, keyEquivalent: "")
-            emptyItem.isEnabled = false
-            menu.addItem(emptyItem)
-            return
-        }
-
-        for item in items.prefix(ClipboardConstants.maxDirectMenuItems) {
-            menu.addItem(makeClipboardMenuItem(for: item))
-        }
-
-        let overflowStart = ClipboardConstants.maxDirectMenuItems
-        guard items.count > overflowStart else {
-            return
-        }
-
-        let maxOverflowItems = ClipboardConstants.overflowSubmenuSize * ClipboardConstants.maxOverflowSubmenus
-        let overflowEnd = min(items.count, overflowStart + maxOverflowItems)
-        var rangeStart = overflowStart
-
-        while rangeStart < overflowEnd {
-            let rangeEnd = min(rangeStart + ClipboardConstants.overflowSubmenuSize, overflowEnd)
-            let submenu = NSMenu(title: "")
-            submenu.autoenablesItems = false
-            let submenuItem = NSMenuItem(title: "\(rangeStart + 1) - \(rangeEnd)", action: nil, keyEquivalent: "")
-            submenuItem.image = snippetFolderMenuIcon
-            submenuItem.submenu = submenu
-
-            for item in items[rangeStart..<rangeEnd] {
-                submenu.addItem(makeClipboardMenuItem(for: item))
-            }
-
-            menu.addItem(submenuItem)
-            rangeStart = rangeEnd
-        }
-    }
-
-    private func makeClipboardMenuItem(for item: ClipboardItem) -> NSMenuItem {
-        let menuItem = NSMenuItem(
-            title: item.menuTitle(),
-            action: #selector(selectClipboardMenuItem(_:)),
-            keyEquivalent: ""
-        )
-        menuItem.target = self
-        menuItem.representedObject = ClipboardMenuPayload(item: item)
-        menuItem.toolTip = Self.truncated(item.plainText, maxLength: ClipboardConstants.maxTooltipLength)
-        menuItem.image = historyMenuIcon
-        return menuItem
-    }
-
-    private func addSnippetItems(to menu: NSMenu, includeEmptyItem: Bool) {
-        addDisabledHeader("Snippets", to: menu)
-
-        let groups = controller.currentSnippetGroups().filter { !$0.snippets.isEmpty }
-
-        guard !groups.isEmpty else {
-            if includeEmptyItem {
-                let emptyItem = NSMenuItem(title: "No snippets configured", action: nil, keyEquivalent: "")
-                emptyItem.isEnabled = false
-                menu.addItem(emptyItem)
-            }
-            return
-        }
-
-        for group in groups {
-            let groupItem = NSMenuItem(
-                title: Self.truncated(group.title, maxLength: ClipboardConstants.maxMenuItemTitleLength),
-                action: nil,
-                keyEquivalent: ""
-            )
-            groupItem.image = snippetFolderMenuIcon
-            let submenu = NSMenu(title: group.title)
-            submenu.autoenablesItems = false
-
-            for snippet in group.snippets {
-                let snippetItem = NSMenuItem(
-                    title: Self.truncated(snippet.title, maxLength: ClipboardConstants.maxMenuItemTitleLength),
-                    action: #selector(selectSnippetMenuItem(_:)),
-                    keyEquivalent: ""
-                )
-                snippetItem.target = self
-                snippetItem.representedObject = SnippetMenuPayload(snippet: snippet)
-                snippetItem.toolTip = Self.truncated(snippet.content, maxLength: ClipboardConstants.maxTooltipLength)
-                snippetItem.image = historyMenuIcon
-                submenu.addItem(snippetItem)
-            }
-
-            groupItem.submenu = submenu
-            menu.addItem(groupItem)
-        }
-    }
-
-    private func addDisabledHeader(_ title: String, to menu: NSMenu) {
-        let headerItem = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        headerItem.isEnabled = false
-        menu.addItem(headerItem)
-    }
-
-    private static func menuIcon(_ source: NSImage, size: CGFloat = 18) -> NSImage {
-        let targetSize = NSSize(width: size, height: size)
-        let image = NSImage(size: targetSize)
-        image.lockFocus()
-        source.draw(
-            in: NSRect(origin: .zero, size: targetSize),
-            from: NSRect(origin: .zero, size: source.size),
-            operation: .sourceOver,
-            fraction: 1
-        )
-        image.unlockFocus()
-        image.isTemplate = source.isTemplate
-        return image
-    }
-
-    private static func firstSelectableItem(in menu: NSMenu) -> NSMenuItem? {
-        menu.items.first { item in
-            !item.isSeparatorItem && item.isEnabled && item.action != nil
-        } ?? menu.items.first { item in
-            !item.isSeparatorItem && item.isEnabled
-        }
-    }
-
-    private func pasteHighlightedClipboardItemAsPlainText() -> Bool {
-        guard let payload = highlightedClipboardPayload(in: popupClipboardMenu) else {
-            return false
-        }
-
-        popupClipboardMenu?.cancelTracking()
-
-        DispatchQueue.main.async { [weak self] in
-            self?.controller.pasteClipboardItemAsPlainText(payload.item)
-        }
-
-        return true
-    }
-
-    private func highlightedClipboardPayload(in menu: NSMenu?) -> ClipboardMenuPayload? {
-        guard let menu else {
-            return nil
-        }
-
-        let highlightedSearch = highlightedClipboardPayloadSearch(in: menu)
-        if highlightedSearch.foundHighlight {
-            return highlightedSearch.payload
-        }
-
-        return firstClipboardPayload(in: menu)
-    }
-
-    private func highlightedClipboardPayloadSearch(
-        in menu: NSMenu
-    ) -> (foundHighlight: Bool, payload: ClipboardMenuPayload?) {
-        if let highlightedItem = menu.highlightedItem {
-            return (true, highlightedItem.representedObject as? ClipboardMenuPayload)
-        }
-
-        for item in menu.items {
-            guard let submenu = item.submenu else {
-                continue
-            }
-
-            let result = highlightedClipboardPayloadSearch(in: submenu)
-            if result.foundHighlight {
-                return result
-            }
-        }
-
-        return (false, nil)
-    }
-
-    private func firstClipboardPayload(in menu: NSMenu) -> ClipboardMenuPayload? {
-        for item in menu.items {
-            if let payload = item.representedObject as? ClipboardMenuPayload {
-                return payload
-            }
-
-            if let submenu = item.submenu, let payload = firstClipboardPayload(in: submenu) {
-                return payload
-            }
-        }
-
-        return nil
-    }
-
-    @objc
-    private func selectClipboardMenuItem(_ sender: NSMenuItem) {
-        guard let payload = sender.representedObject as? ClipboardMenuPayload else {
-            NSSound.beep()
-            return
-        }
-
-        if popupModifierTracker.shouldPasteAsPlainText(triggeringEvent: NSApp.currentEvent) {
-            controller.pasteClipboardItemAsPlainText(payload.item)
-        } else {
-            controller.pasteClipboardItem(payload.item)
-        }
-    }
-
-    @objc
-    private func selectSnippetMenuItem(_ sender: NSMenuItem) {
-        guard let payload = sender.representedObject as? SnippetMenuPayload else {
-            NSSound.beep()
-            return
-        }
-
-        controller.pasteSnippet(payload.snippet)
     }
 
     private static func truncated(_ value: String, maxLength: Int) -> String {
@@ -766,185 +607,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc
     private func quit() {
         NSApp.terminate(nil)
-    }
-}
-
-private final class ClipboardMenuPayload: NSObject {
-    let item: ClipboardItem
-
-    init(item: ClipboardItem) {
-        self.item = item
-    }
-}
-
-private final class PopupModifierTracker {
-    private let commandReturnHandler: () -> Bool
-    private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
-    private var commandIsDown = false
-    private var plainTextPasteIntentDeadline: Date?
-
-    init(commandReturnHandler: @escaping () -> Bool) {
-        self.commandReturnHandler = commandReturnHandler
-    }
-
-    deinit {
-        stop()
-    }
-
-    func start() {
-        stop()
-        commandIsDown = false
-        plainTextPasteIntentDeadline = nil
-
-        let mask =
-            (1 << CGEventType.keyDown.rawValue) |
-            (1 << CGEventType.leftMouseDown.rawValue) |
-            (1 << CGEventType.rightMouseDown.rawValue) |
-            (1 << CGEventType.otherMouseDown.rawValue) |
-            (1 << CGEventType.flagsChanged.rawValue) |
-            (1 << CGEventType.tapDisabledByTimeout.rawValue) |
-            (1 << CGEventType.tapDisabledByUserInput.rawValue)
-
-        guard let eventTap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: CGEventMask(mask),
-            callback: Self.eventTapCallback,
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ) else {
-            return
-        }
-
-        let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
-        CGEvent.tapEnable(tap: eventTap, enable: true)
-
-        self.eventTap = eventTap
-        self.runLoopSource = runLoopSource
-    }
-
-    func stop() {
-        if let eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-        }
-
-        if let runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
-        }
-
-        eventTap = nil
-        runLoopSource = nil
-        commandIsDown = false
-        plainTextPasteIntentDeadline = nil
-    }
-
-    func shouldPasteAsPlainText(triggeringEvent: NSEvent?) -> Bool {
-        if let deadline = plainTextPasteIntentDeadline {
-            plainTextPasteIntentDeadline = nil
-            if deadline >= Date() {
-                return true
-            }
-        }
-
-        guard let triggeringEvent else {
-            return false
-        }
-
-        return Self.isCommandMenuSelection(triggeringEvent)
-    }
-
-    private static let eventTapCallback: CGEventTapCallBack = { _, type, event, userInfo in
-        guard let userInfo else {
-            return Unmanaged.passUnretained(event)
-        }
-
-        let tracker = Unmanaged<PopupModifierTracker>.fromOpaque(userInfo).takeUnretainedValue()
-        return tracker.handle(type: type, event: event)
-    }
-
-    private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            if let eventTap {
-                CGEvent.tapEnable(tap: eventTap, enable: true)
-            }
-            return Unmanaged.passUnretained(event)
-        }
-
-        let eventCommandIsDown = event.flags.contains(.maskCommand) || Self.isCommandPressed()
-
-        switch type {
-        case .flagsChanged:
-            commandIsDown = eventCommandIsDown
-        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
-            if eventCommandIsDown {
-                plainTextPasteIntentDeadline = Date().addingTimeInterval(1.0)
-            }
-        case .keyDown:
-            let keyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
-            if Self.isReturnKey(keyCode), eventCommandIsDown || commandIsDown {
-                plainTextPasteIntentDeadline = Date().addingTimeInterval(1.0)
-                if handleCommandReturn() {
-                    return nil
-                }
-            }
-        default:
-            break
-        }
-
-        return Unmanaged.passUnretained(event)
-    }
-
-    private func handleCommandReturn() -> Bool {
-        guard Thread.isMainThread else {
-            return false
-        }
-
-        return commandReturnHandler()
-    }
-
-    private static func isCommandPressed() -> Bool {
-        let appKitCommandIsDown = NSEvent.modifierFlags
-            .intersection(.deviceIndependentFlagsMask)
-            .contains(.command)
-        let coreGraphicsCommandIsDown = CGEventSource
-            .flagsState(.combinedSessionState)
-            .contains(.maskCommand)
-        let physicalCommandIsDown =
-            CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(kVK_Command)) ||
-            CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(kVK_RightCommand))
-
-        return appKitCommandIsDown || coreGraphicsCommandIsDown || physicalCommandIsDown
-    }
-
-    private static func isCommandMenuSelection(_ event: NSEvent) -> Bool {
-        guard event.modifierFlags
-            .intersection(.deviceIndependentFlagsMask)
-            .contains(.command)
-        else {
-            return false
-        }
-
-        switch event.type {
-        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp:
-            return true
-        case .keyDown, .keyUp:
-            return isReturnKey(UInt32(event.keyCode))
-        default:
-            return false
-        }
-    }
-
-    private static func isReturnKey(_ keyCode: UInt32) -> Bool {
-        keyCode == UInt32(kVK_Return) || keyCode == UInt32(kVK_ANSI_KeypadEnter)
-    }
-}
-
-private final class SnippetMenuPayload: NSObject {
-    let snippet: Snippet
-
-    init(snippet: Snippet) {
-        self.snippet = snippet
     }
 }

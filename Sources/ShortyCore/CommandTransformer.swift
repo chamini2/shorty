@@ -72,7 +72,7 @@ public enum CommandTransformerEngine {
                 return "Invalid epoch seconds"
             }
 
-            return formatUTCAndSanFrancisco(Date(timeIntervalSince1970: seconds), now: now)
+            return formatUTCAndLocal(Date(timeIntervalSince1970: seconds), now: now)
         },
 
         CommandTransformer(
@@ -83,7 +83,7 @@ public enum CommandTransformerEngine {
                 return "Invalid epoch milliseconds"
             }
 
-            return formatUTCAndSanFrancisco(Date(timeIntervalSince1970: milliseconds / 1_000), now: now)
+            return formatUTCAndLocal(Date(timeIntervalSince1970: milliseconds / 1_000), now: now)
         },
 
         CommandTransformer(
@@ -102,7 +102,7 @@ public enum CommandTransformerEngine {
 
             return formatByteConversions(amount: amount, inputUnit: inputUnit)
         },
-    ] + timeTransformers()
+    ]
 
     public static func evaluate(
         _ input: String,
@@ -327,35 +327,65 @@ public enum CommandTransformerEngine {
         segments.append(CommandDisplaySegment(text: text, kind: kind))
     }
 
-    private static func timeTransformers() -> [CommandTransformer] {
-        [
-            timeTransformer(command: "utc time", name: "UTC Time", timeZone: TimeZone(secondsFromGMT: 0)!),
-            timeTransformer(command: "et time", name: "ET Time", timeZone: TimeZone(identifier: "America/New_York")!),
-            timeTransformer(command: "cet time", name: "CET Time", timeZone: TimeZone(identifier: "Europe/Paris")!),
-            timeTransformer(command: "turkey time", name: "Turkey Time", timeZone: TimeZone(identifier: "Europe/Istanbul")!),
-            timeTransformer(command: "dubai time", name: "Dubai Time", timeZone: TimeZone(identifier: "Asia/Dubai")!),
-            timeTransformer(command: "korea time", name: "Korea Time", timeZone: TimeZone(identifier: "Asia/Seoul")!),
-            timeTransformer(command: "japan time", name: "Japan Time", timeZone: TimeZone(identifier: "Asia/Tokyo")!),
-        ]
-    }
-
-    private static func timeTransformer(command: String, name: String, timeZone: TimeZone) -> CommandTransformer {
-        CommandTransformer(
-            name: name,
-            parts: [.string(command)]
-        ) { _, now in
-            format(now, in: timeZone)
-        }
-    }
-
-    private static func formatUTCAndSanFrancisco(_ date: Date, now: Date) -> String {
+    static func formatUTCAndLocal(
+        _ date: Date,
+        now: Date,
+        localTimeZone: TimeZone = .current
+    ) -> String {
         let utc = TimeZone(secondsFromGMT: 0)!
-        let sanFrancisco = TimeZone(identifier: "America/Los_Angeles")!
         let relative = relativeDescription(from: date, to: now)
+        let utcLine = "UTC: \(format(date, in: utc)) (\(relative))"
+
+        // Nothing to add when the machine already runs on UTC.
+        guard localTimeZone.secondsFromGMT(for: date) != 0 else {
+            return utcLine
+        }
+
+        // The formatted time already carries the offset, so a long zone name
+        // would only repeat it.
         return """
-        UTC: \(format(date, in: utc)) (\(relative))
-        San Francisco: \(format(date, in: sanFrancisco)) (\(relative))
+        \(utcLine)
+        Local: \(format(date, in: localTimeZone)) (\(relative))
         """
+    }
+
+    /// Current wall clock in a zone, for the catalog's Time group.
+    ///
+    /// Labelled with the offset rather than an abbreviation: `PST` does not
+    /// say how far from UTC it is, and the system only knows such names for a
+    /// few zones anyway — it answers `GMT+9` for Tokyo. The offset is read at
+    /// the given date, so a zone on daylight saving reads `UTC-7` in summer
+    /// and `UTC-8` in winter.
+    public static func currentTime(in timeZone: TimeZone, now: Date = Date()) -> String {
+        "\(wallClock(now, in: timeZone)) \(utcOffsetLabel(of: timeZone, at: now))"
+    }
+
+    /// `UTC`, `UTC-8`, `UTC+5:30`.
+    public static func utcOffsetLabel(of timeZone: TimeZone, at date: Date) -> String {
+        let seconds = timeZone.secondsFromGMT(for: date)
+
+        guard seconds != 0 else {
+            return "UTC"
+        }
+
+        let sign = seconds < 0 ? "-" : "+"
+        let minutes = abs(seconds) / 60
+        let remainder = minutes % 60
+
+        guard remainder != 0 else {
+            return "UTC\(sign)\(minutes / 60)"
+        }
+
+        return String(format: "UTC%@%d:%02d", sign, minutes / 60, remainder)
+    }
+
+    private static func wallClock(_ date: Date, in timeZone: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: date)
     }
 
     private static func format(_ date: Date, in timeZone: TimeZone) -> String {
