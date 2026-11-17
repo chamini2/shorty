@@ -1,5 +1,4 @@
 import AppKit
-import LinkPresentation
 import ShortyCore
 
 /// Right-hand pane of the clipboard picker: full contents on top, an
@@ -29,7 +28,7 @@ final class ClipboardPickerDetailView: NSView {
     private let imageView = NSImageView()
     private let assetStore = ClipboardAssetStore()
     private let linkPreviews = LinkPreviewLoader()
-    private var linkView: LPLinkView?
+    private var linkView: NSView?
     /// What the pane is showing, so a fetch that finishes late is ignored.
     private var shownLink: URL?
     /// Holds the body's bottom while no preview is shown, and is swapped for
@@ -259,44 +258,36 @@ final class ClipboardPickerDetailView: NSView {
         return container
     }
 
-    /// Shows the site behind a link once it answers, leaving the address on
+    /// Shows the card the site offers once it answers, leaving the address on
     /// screen until then, and never replacing a pane the selection has moved
     /// on from.
     private func showLinkPreview(for url: URL) {
         shownLink = url
 
-        if case let .metadata(metadata)? = linkPreviews.cached(for: url) {
-            present(metadata, for: url)
+        if case let .card(card, image)? = linkPreviews.cached(for: url) {
+            present(card, image: image)
             return
         }
 
         linkPreviews.load(url) { [weak self] result in
-            guard let self, shownLink == url, case let .metadata(metadata) = result else {
+            guard let self, shownLink == url, case let .card(card, image) = result else {
                 return
             }
 
-            present(metadata, for: url)
+            present(card, image: image)
         }
     }
 
-    /// The address stays on screen above the preview, since the preview shows
-    /// what a page is but not where it points.
-    private func present(_ metadata: LPLinkMetadata, for url: URL) {
+    /// The address stays on screen above the card, since the card shows what
+    /// a page is but not where it points.
+    private func present(_ card: LinkCard, image: NSImage?) {
         removeLinkView()
 
-        let view = LPLinkView(metadata: metadata)
-        view.translatesAutoresizingMaskIntoConstraints = false
+        let view = LinkPreviewCardView(card: card, image: image)
 
-        // A preview's intrinsic size follows its image, which can be enormous.
-        // Lowering these lets the constraints below decide instead.
-        for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
-            view.setContentCompressionResistancePriority(.defaultLow, for: axis)
-            view.setContentHuggingPriority(.defaultLow, for: axis)
-        }
-
-        // The frame comes from the clipping box, not from the preview: the
-        // box holds the share of the pane the preview is allowed, and cuts
-        // off anything the preview still draws past it.
+        // The frame comes from the clipping box, not from the card: the box
+        // holds the share of the pane the preview is allowed, and cuts off
+        // anything the card still draws past it.
         let box = NSView()
         box.translatesAutoresizingMaskIntoConstraints = false
         box.wantsLayer = true

@@ -143,9 +143,11 @@ the search box needs for deleting to the start of the line.
 - Keeps copied images, up to 10 MB each, beside the history in `ClipboardAssets/`. Pasting writes the image data, not a file path.
 - Keeps copied files as paths rather than copies, so pasting hands over the file itself. An entry whose file has moved says so and is skipped.
 - Records which app a copy came from, by the front window rather than the frontmost app, so an overlay such as a terminal hotkey window is credited correctly.
-- Previews a copied link in the detail pane, showing the page title and image.
-  Reading a link means fetching it, so this happens only for the entry you
-  select and each answer is kept for the session. Turn it off with:
+- Previews a copied link in the detail pane: the same card a social site
+  unfurls, built from the page's own `og:` tags, with its picture, title and
+  summary. Reading a link means fetching it, so this happens only for the
+  entry you select and each answer is kept for the session. A page that says
+  nothing about itself shows no card. Turn it off with:
 
   ```yaml
   clipboard:
