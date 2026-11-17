@@ -442,7 +442,10 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
             return enterSelectedFolderIfNeeded()
 
         case UInt32(kVK_Delete), UInt32(kVK_ForwardDelete):
-            if event.modifierFlags.contains(.command) {
+            // Shift, not command: `cmd+backspace` means "delete to the start
+            // of the line" in a text field, and taking that away from the
+            // search box is worse than choosing a key the field ignores.
+            if event.modifierFlags.contains(.shift) {
                 return deleteSelectedHistoryItem()
             }
 
