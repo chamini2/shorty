@@ -141,9 +141,11 @@ public enum ClipboardPickerSearch {
             query: normalizedQuery
         )
 
-        if !snippetEntries.isEmpty || normalizedQuery.isEmpty {
+        // Left out when there is nothing to show: a header over a "none
+        // configured" row is furniture for a feature you do not use.
+        if !snippetEntries.isEmpty {
             entries.append(.header("Snippets"))
-            entries.append(contentsOf: snippetEntries.isEmpty ? [.empty("No snippets configured")] : snippetEntries)
+            entries.append(contentsOf: snippetEntries)
         }
 
         if mode == .all {
@@ -158,7 +160,17 @@ public enum ClipboardPickerSearch {
             }
         }
 
-        return entries.isEmpty ? [.empty("No matches")] : entries
+        guard entries.isEmpty else {
+            return entries
+        }
+
+        // Snippets are the whole picker in this mode, so say why it is bare
+        // rather than claim the query found nothing.
+        if mode == .snippetsOnly, rootSnippetEntries(snippetGroups).isEmpty {
+            return [.empty("No snippets configured")]
+        }
+
+        return [.empty("No matches")]
     }
 
     public static func folderEntries(
