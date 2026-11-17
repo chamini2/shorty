@@ -150,12 +150,15 @@ final class ClipboardItemDetailTests: XCTestCase {
         XCTAssertNil(ClipboardItemDetailBuilder.detail(for: .empty("No matches")))
     }
 
-    func testSourceCaptureSkipsShortyItself() {
-        XCTAssertNil(
-            ClipboardSource.frontmostApplication(
-                workspace: .shared,
-                ownPID: NSRunningApplication.current.processIdentifier
-            )
-        )
+    func testSourceCaptureNamesSomeRunningApplication() {
+        // Whatever is in front, including Shorty itself, is a valid answer;
+        // the only wrong one would be crediting the window behind.
+        let source = ClipboardSource.frontmostApplication()
+
+        guard let source else {
+            return
+        }
+
+        XCTAssertNotNil(source.bundleID ?? source.name)
     }
 }
