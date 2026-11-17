@@ -72,9 +72,10 @@ final class ClipboardPickerSearchTests: XCTestCase {
             mode: .all
         )
 
-        XCTAssertEqual(entries.map(\.title), ["History", "Deep needle", "Snippets", "Greeting"])
-        XCTAssertEqual(entries[1].pasteResult, .history(history[24]))
-        XCTAssertEqual(entries[3].pasteResult, .snippet(groupTitle: "Work", snippet: groups[0].snippets[0]))
+        // Snippets lead here as they do unfiltered: one order, searched or not.
+        XCTAssertEqual(entries.map(\.title), ["Snippets", "Greeting", "History", "Deep needle"])
+        XCTAssertEqual(entries[1].pasteResult, .snippet(groupTitle: "Work", snippet: groups[0].snippets[0]))
+        XCTAssertEqual(entries[3].pasteResult, .history(history[24]))
     }
 
     func testRootSearchKeepsMatchingFoldersOpenable() throws {

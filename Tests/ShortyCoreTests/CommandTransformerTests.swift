@@ -237,14 +237,15 @@ final class CommandTransformerTests: XCTestCase {
         XCTAssertEqual(results[0].resultText, "hi there")
     }
 
-    func testCurrentTimeSupportsRequestedZones() {
+    /// `utc time` and its friends are gone: zones are a list you browse under
+    /// Time, so `CommandTransformerEngine.currentTime` is what fills the rows.
+    func testCurrentTimeSpellsOutTheOffset() {
         let now = Date(timeIntervalSince1970: 0)
-        let zones = ["utc", "et", "cet", "turkey", "dubai", "korea", "japan"]
+        let tokyo = TimeZone(identifier: "Asia/Tokyo")!
 
-        for zone in zones {
-            let results = CommandTransformerEngine.evaluate("\(zone) time", now: now)
-            XCTAssertEqual(results.count, 1, "Expected \(zone) to match")
-            XCTAssertNotNil(results[0].resultText)
-        }
+        XCTAssertEqual(
+            CommandTransformerEngine.currentTime(in: tokyo, now: now),
+            "1970-01-01 09:00:00 UTC+9"
+        )
     }
 }
