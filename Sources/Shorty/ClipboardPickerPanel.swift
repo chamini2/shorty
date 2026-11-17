@@ -340,6 +340,22 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
 
             return enterSelectedFolderIfNeeded()
 
+        case #selector(NSResponder.deleteBackward(_:)),
+            #selector(NSResponder.deleteForward(_:)):
+            // `shift+backspace` deletes the selected entry, so the field
+            // editor must not take a character out of the search box as well.
+            // AppKit drops the modifier when it turns a key into a command,
+            // so the shift is read back off the event.
+            guard Self.shiftModifierIsActive(event: NSApp.currentEvent) else {
+                return false
+            }
+
+            if consumeLocallyHandledCurrentEvent() {
+                return true
+            }
+
+            return deleteSelectedHistoryItem()
+
         case #selector(NSResponder.insertNewline(_:)),
             #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
             if consumeLocallyHandledCurrentEvent() {
