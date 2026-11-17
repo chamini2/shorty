@@ -129,11 +129,14 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         view.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(view)
 
+        // Fixed, not pinned to the container's edges: a content view's own
+        // constraints reach the window and can resize it, and a link preview
+        // with a large image was growing the box that way.
         NSLayoutConstraint.activate([
             view.topAnchor.constraint(equalTo: container.topAnchor),
             view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            view.widthAnchor.constraint(equalToConstant: Metrics.width),
+            view.heightAnchor.constraint(equalToConstant: Metrics.height),
         ])
 
         panel.setContentSize(NSSize(width: Metrics.width, height: Metrics.height))
