@@ -116,9 +116,42 @@ final class CommandCatalogTests: XCTestCase {
         }
 
         let zones = CommandCatalog.entries(in: entries, query: "")
-        XCTAssertEqual(zones.map(\.title).prefix(2).map(String.init), ["Local", "UTC"])
-        XCTAssertEqual(zones.first { $0.title == "UTC" }?.detail, "1970-01-01 00:00:00 UTC")
-        XCTAssertEqual(CommandCatalog.entries(in: entries, query: "japan").count, 1)
+        XCTAssertEqual(zones.map(\.title), ["San Francisco", "Tokyo"])
+        XCTAssertEqual(zones.first { $0.title == "Tokyo" }?.detail, "1970-01-01 09:00:00 UTC+9")
+        XCTAssertEqual(CommandCatalog.entries(in: entries, query: "tokyo").count, 1)
+    }
+
+    /// The list keeps the order the config gives it, so landing on the local
+    /// zone is a matter of which row opens selected, not of sorting.
+    func testTimeOpensOnTheLocalZoneWhereverItIsListed() throws {
+        let configured = try CommandBoxSettingsParser.parse(yaml: """
+        command-box:
+          timezones: [San Francisco, Tokyo, Madrid]
+        """)
+        let entries = CommandCatalog.rootEntries(
+            query: "",
+            now: now,
+            localTimeZone: madrid,
+            settings: configured
+        )
+        let time = try XCTUnwrap(entries.first { $0.title == "Time" })
+
+        guard case let .list(zones) = time.destination else {
+            return XCTFail("Expected Time to lead to a list")
+        }
+
+        XCTAssertEqual(zones.map(\.title), ["San Francisco", "Tokyo", "Madrid"])
+        XCTAssertEqual(zones.firstIndex(where: \.opensSelected), 2)
+    }
+
+    func testNothingOpensSelectedWhenTheLocalZoneIsNotListed() throws {
+        let time = try XCTUnwrap(root("").first { $0.title == "Time" })
+
+        guard case let .list(zones) = time.destination else {
+            return XCTFail("Expected Time to lead to a list")
+        }
+
+        XCTAssertFalse(zones.contains { $0.opensSelected })
     }
 
     func testChevronMarksAnythingThatNavigates() throws {

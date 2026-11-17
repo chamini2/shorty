@@ -35,6 +35,9 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
     /// Where this entry is in the world, for lists that show a map behind
     /// themselves: the time zones do.
     public let marker: WorldMapMarker?
+    /// The row its list opens on. Time marks the local zone: the list is
+    /// about elsewhere, but you read it from where you are.
+    public let opensSelected: Bool
 
     public init(
         id: String,
@@ -43,7 +46,8 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
         action: CommandAction? = nil,
         destination: CommandDestination? = nil,
         keywords: [String] = [],
-        marker: WorldMapMarker? = nil
+        marker: WorldMapMarker? = nil,
+        opensSelected: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -52,6 +56,7 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
         self.destination = destination
         self.keywords = keywords
         self.marker = marker
+        self.opensSelected = opensSelected
     }
 
     /// Whether picking this takes you somewhere rather than finishing a job.
@@ -72,7 +77,8 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
             action: action,
             destination: destination,
             keywords: keywords,
-            marker: marker
+            marker: marker,
+            opensSelected: opensSelected
         )
     }
 }
@@ -255,7 +261,8 @@ public enum CommandCatalog {
                 detail: text,
                 action: .copyText(text),
                 keywords: [zone.timeZone.identifier],
-                marker: TimeZoneLocations.marker(for: zone.timeZone, at: now)
+                marker: TimeZoneLocations.marker(for: zone.timeZone, at: now),
+                opensSelected: zone.timeZone.identifier == localTimeZone.identifier
             )
         }
     }
