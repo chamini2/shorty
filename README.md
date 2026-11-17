@@ -271,7 +271,9 @@ instead.
 Zones are listed in the order written, and each shows its offset as `UTC-8` or
 `UTC+5:30` rather than an abbreviation, since `PST` says nothing about how far
 from UTC it is. A configured list replaces the default pair rather than adding
-to it.
+to it. The list opens on your own zone wherever it sits in that order, since
+the other cities are read against the time where you are. Typing selects the
+best match instead.
 
 ## Setup
 

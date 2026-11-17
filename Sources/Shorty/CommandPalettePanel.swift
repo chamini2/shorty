@@ -280,7 +280,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         }
 
         if resetSelection || !entries.indices.contains(selectedIndex) {
-            selectedIndex = 0
+            selectedIndex = openingSelectionIndex(query: query)
         }
 
         rowHeights = entries.map {
@@ -289,6 +289,16 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
 
         renderRows()
         resizePanel()
+    }
+
+    /// A list can name the row it opens on, as Time does with the local zone.
+    /// Typing overrides it: then the best match is what you asked for.
+    private func openingSelectionIndex(query: String) -> Int {
+        guard query.isEmpty, let index = entries.firstIndex(where: \.opensSelected) else {
+            return 0
+        }
+
+        return index
     }
 
     /// Only a list made of places gets the map: the root, with its mix of
