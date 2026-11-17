@@ -14,13 +14,15 @@ public struct ClipboardSource: Codable, Equatable, Sendable {
     }
 
     public static func frontmostApplication(
-        workspace: NSWorkspace = .shared,
-        ownPID: pid_t = ProcessInfo.processInfo.processIdentifier
+        workspace: NSWorkspace = .shared
     ) -> ClipboardSource? {
         // An overlay panel, such as iTerm2's hotkey window, takes keyboard
         // focus without activating its app, so `frontmostApplication` still
         // names whatever sits behind it. The front window knows better.
-        if let pid = frontWindowOwnerPID(excluding: ownPID),
+        //
+        // Shorty's own window counts: copying out of its search box came from
+        // Shorty, not from whatever happens to sit behind the panel.
+        if let pid = frontWindowOwnerPID(),
            let application = NSRunningApplication(processIdentifier: pid) {
             return ClipboardSource(
                 bundleID: application.bundleIdentifier,
@@ -28,8 +30,7 @@ public struct ClipboardSource: Codable, Equatable, Sendable {
             )
         }
 
-        guard let application = workspace.frontmostApplication,
-              application.processIdentifier != ownPID else {
+        guard let application = workspace.frontmostApplication else {
             return nil
         }
 
@@ -41,7 +42,7 @@ public struct ClipboardSource: Codable, Equatable, Sendable {
 
     /// Owner of the frontmost ordinary window. Skips always-on-top HUDs by
     /// capping the window layer, and menu bar extras by requiring real size.
-    static func frontWindowOwnerPID(excluding ownPID: pid_t) -> pid_t? {
+    static func frontWindowOwnerPID() -> pid_t? {
         guard let windows = CGWindowListCopyWindowInfo(
             [.optionOnScreenOnly, .excludeDesktopElements],
             kCGNullWindowID
@@ -49,15 +50,14 @@ public struct ClipboardSource: Codable, Equatable, Sendable {
             return nil
         }
 
-        return attributableOwnerPID(from: windows, excluding: ownPID)
+        return attributableOwnerPID(from: windows)
     }
 
     /// Split from the window query so the filtering can be tested without a
     /// window server.
-    static func attributableOwnerPID(from windows: [[String: Any]], excluding ownPID: pid_t) -> pid_t? {
+    static func attributableOwnerPID(from windows: [[String: Any]]) -> pid_t? {
         for window in windows {
             guard let ownerPID = (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
-                  ownerPID != ownPID,
                   let layer = (window[kCGWindowLayer as String] as? NSNumber)?.intValue,
                   layer >= 0,
                   layer <= Self.maxAttributableWindowLayer,
