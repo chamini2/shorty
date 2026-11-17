@@ -138,6 +138,15 @@ The picker is a floating panel with a search box. Choosing an item pastes it int
 - Keeps copied images, up to 10 MB each, beside the history in `ClipboardAssets/`. Pasting writes the image data, not a file path.
 - Keeps copied files as paths rather than copies, so pasting hands over the file itself. An entry whose file has moved says so and is skipped.
 - Records which app a copy came from, by the front window rather than the frontmost app, so an overlay such as a terminal hotkey window is credited correctly.
+- Previews a copied link in the detail pane, showing the page title and image.
+  Reading a link means fetching it, so this happens only for the entry you
+  select and each answer is kept for the session. Turn it off with:
+
+  ```yaml
+  clipboard:
+    link-previews: false
+  ```
+
 - Persists across restarts in `~/Library/Application Support/Shorty/ClipboardHistory.json`.
 - The right-hand pane shows the entry in full, with its source, type, size and when it was copied.
 

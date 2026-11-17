@@ -1,4 +1,5 @@
 import AppKit
+import LinkPresentation
 import ShortyCore
 
 /// Right-hand pane of the clipboard picker: full contents on top, an
@@ -18,12 +19,28 @@ final class ClipboardPickerDetailView: NSView {
         static let rowInset: CGFloat = 8
         static let iconSize: CGFloat = 15
         static let iconSpacing: CGFloat = 6
+        static let previewSpacing: CGFloat = 10
+        /// The preview gets twice the room the address does.
+        static let previewShare: CGFloat = 2
     }
 
     private let bodyScrollView = NSScrollView()
     private let bodyTextView = NSTextView()
     private let imageView = NSImageView()
     private let assetStore = ClipboardAssetStore()
+    private let linkPreviews = LinkPreviewLoader()
+    private var linkView: LPLinkView?
+    /// What the pane is showing, so a fetch that finishes late is ignored.
+    private var shownLink: URL?
+    /// Holds the body's bottom while no preview is shown, and is swapped for
+    /// the split layout when one arrives.
+    private var bodyBottomConstraint: NSLayoutConstraint?
+    private var previewConstraints: [NSLayoutConstraint] = []
+    /// Clips the preview to the room it is given.
+    private var linkBox: NSView?
+
+    /// Set from config: previewing a link means fetching it.
+    var showsLinkPreviews = true
     private let sectionTitleLabel = NSTextField(labelWithString: "Information")
     private let rowsStackView = NSStackView()
     private let placeholderLabel = NSTextField(labelWithString: "")
@@ -39,6 +56,9 @@ final class ClipboardPickerDetailView: NSView {
     }
 
     func update(with detail: ClipboardItemDetail?) {
+        removeLinkView()
+        shownLink = nil
+
         guard let detail else {
             bodyScrollView.isHidden = true
             imageView.isHidden = true
@@ -59,6 +79,10 @@ final class ClipboardPickerDetailView: NSView {
 
         bodyTextView.string = detail.body
         bodyTextView.scrollToBeginningOfDocument(nil)
+
+        if detail.kind == .link, showsLinkPreviews, let url = URL(string: detail.body.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            showLinkPreview(for: url)
+        }
 
         rowsStackView.arrangedSubviews.forEach { view in
             rowsStackView.removeArrangedSubview(view)
@@ -140,7 +164,7 @@ final class ClipboardPickerDetailView: NSView {
             bodyScrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
 
             sectionTitleLabel.topAnchor.constraint(
-                equalTo: bodyScrollView.bottomAnchor,
+                greaterThanOrEqualTo: bodyScrollView.bottomAnchor,
                 constant: Metrics.sectionTopSpacing
             ),
             sectionTitleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
@@ -161,6 +185,13 @@ final class ClipboardPickerDetailView: NSView {
             placeholderLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
             placeholderLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
+
+        let bodyBottom = sectionTitleLabel.topAnchor.constraint(
+            equalTo: bodyScrollView.bottomAnchor,
+            constant: Metrics.sectionTopSpacing
+        )
+        bodyBottom.isActive = true
+        bodyBottomConstraint = bodyBottom
     }
 
     private func makeRowView(row: ClipboardDetailRow, icon: NSImage?, isEven: Bool) -> NSView {
@@ -226,6 +257,88 @@ final class ClipboardPickerDetailView: NSView {
 
         NSLayoutConstraint.activate(constraints)
         return container
+    }
+
+    /// Shows the site behind a link once it answers, leaving the address on
+    /// screen until then, and never replacing a pane the selection has moved
+    /// on from.
+    private func showLinkPreview(for url: URL) {
+        shownLink = url
+
+        if case let .metadata(metadata)? = linkPreviews.cached(for: url) {
+            present(metadata, for: url)
+            return
+        }
+
+        linkPreviews.load(url) { [weak self] result in
+            guard let self, shownLink == url, case let .metadata(metadata) = result else {
+                return
+            }
+
+            present(metadata, for: url)
+        }
+    }
+
+    /// The address stays on screen above the preview, since the preview shows
+    /// what a page is but not where it points.
+    private func present(_ metadata: LPLinkMetadata, for url: URL) {
+        removeLinkView()
+
+        let view = LPLinkView(metadata: metadata)
+        view.translatesAutoresizingMaskIntoConstraints = false
+
+        // A preview's intrinsic size follows its image, which can be enormous.
+        // Lowering these lets the constraints below decide instead.
+        for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
+            view.setContentCompressionResistancePriority(.defaultLow, for: axis)
+            view.setContentHuggingPriority(.defaultLow, for: axis)
+        }
+
+        // The frame comes from the clipping box, not from the preview: the
+        // box holds the share of the pane the preview is allowed, and cuts
+        // off anything the preview still draws past it.
+        let box = NSView()
+        box.translatesAutoresizingMaskIntoConstraints = false
+        box.wantsLayer = true
+        box.layer?.masksToBounds = true
+
+        addSubview(box)
+        box.addSubview(view)
+        linkBox = box
+        linkView = view
+
+        bodyBottomConstraint?.isActive = false
+
+        previewConstraints = [
+            box.topAnchor.constraint(equalTo: bodyScrollView.bottomAnchor, constant: Metrics.previewSpacing),
+            box.leadingAnchor.constraint(equalTo: bodyScrollView.leadingAnchor),
+            box.trailingAnchor.constraint(equalTo: bodyScrollView.trailingAnchor),
+            box.heightAnchor.constraint(
+                equalTo: bodyScrollView.heightAnchor,
+                multiplier: Metrics.previewShare
+            ),
+            sectionTitleLabel.topAnchor.constraint(
+                equalTo: box.bottomAnchor,
+                constant: Metrics.sectionTopSpacing
+            ),
+
+            view.topAnchor.constraint(equalTo: box.topAnchor),
+            view.leadingAnchor.constraint(equalTo: box.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: box.trailingAnchor),
+            view.bottomAnchor.constraint(equalTo: box.bottomAnchor),
+        ]
+
+        NSLayoutConstraint.activate(previewConstraints)
+    }
+
+    private func removeLinkView() {
+        NSLayoutConstraint.deactivate(previewConstraints)
+        previewConstraints = []
+        linkView?.removeFromSuperview()
+        linkView = nil
+        linkBox?.removeFromSuperview()
+        linkBox = nil
+        bodyBottomConstraint?.isActive = true
     }
 
     /// Images show the picture; copied files show the icon of the first file.
