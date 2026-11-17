@@ -13,10 +13,11 @@ concurrency:
 jobs:
   test:
     # A macOS runner for AppKit, Carbon and the window server the clipboard
-    # tests talk to. macos-15 is the pool this account can reach: macos-14 is
-    # retired and answers "configuration not supported", and macos-13 is too
-    # old for the Swift 6 tools this package declares.
-    runs-on: macos-15
+    # tests talk to. `macos-latest` is arm64 and free, where every Intel label
+    # is a larger runner and billed by the minute even on a public repo. The
+    # step below picks the newest Xcode, so a move to a newer image is a
+    # toolchain change we see rather than a build that breaks.
+    runs-on: macos-latest
 
     steps:
       - uses: actions/checkout@v4
