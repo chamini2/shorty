@@ -54,6 +54,12 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     private let tableView = ClipboardPickerTableView()
     private let scrollView = ClipboardPickerScrollView()
     private let detailView = ClipboardPickerDetailView()
+
+    var showsLinkPreviews = true {
+        didSet {
+            detailView.showsLinkPreviews = showsLinkPreviews
+        }
+    }
     private let detailDateFormatter = ClipboardItemDetailBuilder.defaultDateFormatter()
     private var mode: ClipboardPickerMode = .all
     private var history: [ClipboardItem] = []

@@ -475,6 +475,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             mode = .snippetsOnly
         }
 
+        clipboardPickerPanel.showsLinkPreviews = controller.loadedClipboardSettings.linkPreviewsEnabled
         let targetApplication = capturedTarget ?? Self.currentPasteTargetApplication()
         clipboardPickerPanel.show(
             mode: mode,
