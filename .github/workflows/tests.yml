@@ -13,14 +13,23 @@ concurrency:
 jobs:
   test:
     # A macOS runner for AppKit, Carbon and the window server the clipboard
-    # tests talk to. Swift 6 tools need Xcode 16, which this image carries.
-    runs-on: macos-15
+    # tests talk to. macos-14 over macos-15: the same arm64 family, usually
+    # the shorter queue, and its image carries an Xcode 16 for the Swift 6
+    # tools this package declares.
+    runs-on: macos-14
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Report the toolchain
-        run: swift --version
+      - name: Pick the newest Xcode on the image
+        # The default selection is not always the newest one installed, and
+        # `swift-tools-version: 6.0` needs Xcode 16 or later.
+        run: |
+          newest=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$newest" ]; then
+            sudo xcode-select -s "$newest"
+          fi
+          swift --version
 
       - name: Cache the build
         uses: actions/cache@v4
