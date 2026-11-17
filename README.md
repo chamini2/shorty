@@ -128,8 +128,13 @@ The picker is a floating panel with a search box. Choosing an item pastes it int
 | `cmd+return` | Copy to the clipboard without pasting |
 | `option+return` | Paste as plain text (no formatting) |
 | `shift+return` | Trim each line, drop empty lines, join with no separator, save as a new history item, and paste |
-| `cmd+backspace` | Delete the selected history entry |
+| `shift+backspace` | Delete the selected history entry |
 | `cmd+v` / `cmd+c` / `cmd+x` / `cmd+a` | Edit the search field |
+
+Escape clears the search first, then leaves a folder, then closes. The paste
+modifiers work on click too, and `shift` wins over `cmd`, which wins over
+`option`. Deleting is on `shift+backspace` rather than `cmd+backspace`, which
+the search box needs for deleting to the start of the line.
 
 ### Clipboard History
 
@@ -167,19 +172,6 @@ Each group is a folder in the picker, each key is an item title, and the value i
 Snippets sit above the clipboard history in the picker. The picker opens on the
 newest history entry, so snippets are one `up` away and never in the way.
 
-### Picker Keys
-
-| Key | Action |
-| --- | --- |
-| `return` | Paste the entry, keeping rich text |
-| `cmd+return` | Copy to the clipboard without pasting |
-| `option+return` | Paste as plain text |
-| `shift+return` | Paste with blank lines dropped and lines joined |
-| `cmd+backspace` | Delete the selected history entry |
-| `cmd+v` / `cmd+c` / `cmd+x` / `cmd+a` | Edit the search field |
-
-Modifiers also work on click, and `shift` wins over `cmd`, which wins over
-`option`.
 
 ## 4. Command Box
 
