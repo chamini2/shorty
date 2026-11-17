@@ -13,10 +13,10 @@ concurrency:
 jobs:
   test:
     # A macOS runner for AppKit, Carbon and the window server the clipboard
-    # tests talk to. macos-14 over macos-15: the same arm64 family, usually
-    # the shorter queue, and its image carries an Xcode 16 for the Swift 6
-    # tools this package declares.
-    runs-on: macos-14
+    # tests talk to. macos-15 is the pool this account can reach: macos-14 is
+    # retired and answers "configuration not supported", and macos-13 is too
+    # old for the Swift 6 tools this package declares.
+    runs-on: macos-15
 
     steps:
       - uses: actions/checkout@v4
