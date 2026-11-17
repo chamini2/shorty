@@ -260,6 +260,10 @@ A city name, a zone identifier such as `Asia/Tokyo`, or an abbreviation such as
 `JST` all work, and the name you write becomes the label. A name that does not
 resolve fails the config with suggestions.
 
+Behind the list sits a faint world map with a dot on each zone's city. The
+selected one pulses. A zone with no city, such as UTC, shows its meridian
+instead.
+
 Zones are listed in the order written, and each shows its offset as `UTC-8` or
 `UTC+5:30` rather than an abbreviation, since `PST` says nothing about how far
 from UTC it is. A configured list replaces the default pair rather than adding

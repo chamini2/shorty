@@ -26,6 +26,8 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     private let stackView = NSStackView()
     private let scrollView = NSScrollView()
     private let listContainer = CommandPaletteListContainerView()
+    /// Behind the rows, for lists whose entries are places: the time zones.
+    private let mapView = WorldMapView(frame: .zero)
     private var entries: [CommandEntry] = []
     private var rowHeights: [CGFloat] = []
     private var selectedIndex = 0
@@ -183,6 +185,8 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         stackView.translatesAutoresizingMaskIntoConstraints = false
         listContainer.translatesAutoresizingMaskIntoConstraints = false
+        mapView.translatesAutoresizingMaskIntoConstraints = false
+        mapView.isHidden = !showsMap
 
         // The panel no longer grows with its rows, so the list scrolls.
         scrollView.documentView = listContainer
@@ -194,12 +198,19 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         listContainer.addSubview(stackView)
 
         container.addSubview(header)
+        // Added first, so the rows draw over it.
+        container.addSubview(mapView)
         container.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.topPadding),
             header.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+
+            mapView.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            mapView.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
+            mapView.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+            mapView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
 
             scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Metrics.resultTopSpacing),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.horizontalPadding),
@@ -281,7 +292,26 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         resizePanel()
     }
 
+    /// Only a list made of places gets the map: the root, with its mix of
+    /// commands, does not.
+    private var showsMap: Bool {
+        listEntries?.contains { $0.marker != nil } ?? false
+    }
+
+    private func updateMap() {
+        guard showsMap else {
+            return
+        }
+
+        mapView.show(
+            entries.compactMap(\.marker),
+            selected: entries.indices.contains(selectedIndex) ? entries[selectedIndex].marker : nil
+        )
+    }
+
     private func renderRows() {
+        updateMap()
+
         for view in stackView.arrangedSubviews {
             stackView.removeArrangedSubview(view)
             view.removeFromSuperview()

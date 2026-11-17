@@ -32,6 +32,9 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
     public let destination: CommandDestination?
     /// Extra words the query can match, beyond the title.
     public let keywords: [String]
+    /// Where this entry is in the world, for lists that show a map behind
+    /// themselves: the time zones do.
+    public let marker: WorldMapMarker?
 
     public init(
         id: String,
@@ -39,7 +42,8 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
         detail: String? = nil,
         action: CommandAction? = nil,
         destination: CommandDestination? = nil,
-        keywords: [String] = []
+        keywords: [String] = [],
+        marker: WorldMapMarker? = nil
     ) {
         self.id = id
         self.title = title
@@ -47,6 +51,7 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
         self.action = action
         self.destination = destination
         self.keywords = keywords
+        self.marker = marker
     }
 
     /// Whether picking this takes you somewhere rather than finishing a job.
@@ -66,7 +71,8 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
             detail: detail,
             action: action,
             destination: destination,
-            keywords: keywords
+            keywords: keywords,
+            marker: marker
         )
     }
 }
@@ -248,7 +254,8 @@ public enum CommandCatalog {
                 title: zone.label,
                 detail: text,
                 action: .copyText(text),
-                keywords: [zone.timeZone.identifier]
+                keywords: [zone.timeZone.identifier],
+                marker: TimeZoneLocations.marker(for: zone.timeZone, at: now)
             )
         }
     }
