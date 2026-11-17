@@ -116,7 +116,7 @@ final class CommandBoxSettingsTests: XCTestCase {
         XCTAssertEqual(CommandCatalog.entries(in: zones, query: "").map(\.title), ["Caracas", "UTC"])
     }
 
-    func testConfiguredZonesReplaceLocalAndUTC() throws {
+    func testConfiguredZonesReplaceTheDefaultPair() throws {
         let settings = try CommandBoxSettingsParser.parse(yaml: """
         command-box:
           timezones:

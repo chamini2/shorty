@@ -19,7 +19,10 @@ final class CommandCatalogTests: XCTestCase {
     func testEmptyQueryListsTheCommands() {
         let entries = root("")
 
-        XCTAssertEqual(entries.map(\.title), ["Clipboard History", "Time", "Keep the Mac Awake", "Window"])
+        XCTAssertEqual(
+            entries.map(\.title),
+            ["Clipboard History", "Time", "Keep the Mac Awake", "Window"]
+        )
         XCTAssertFalse(entries.contains { $0.title == "Snippets" }, "the picker already lists them")
         XCTAssertFalse(
             entries.contains {
@@ -49,12 +52,24 @@ final class CommandCatalogTests: XCTestCase {
     func testWindowGroupLeadsWithMaximizeAndEndsWithRestore() {
         XCTAssertEqual(
             windowMoves(screenCount: 2),
-            ["Maximize", "Left Half", "Right Half", "Left Monitor", "Right Monitor", "Restore"]
+            [
+                "Maximize",
+                "Make Larger",
+                "Make Smaller",
+                "Left Half",
+                "Right Half",
+                "Left Monitor",
+                "Right Monitor",
+                "Restore",
+            ]
         )
     }
 
     func testMonitorMovesAreLeftOutWithOneDisplay() {
-        XCTAssertEqual(windowMoves(screenCount: 1), ["Maximize", "Left Half", "Right Half", "Restore"])
+        XCTAssertEqual(
+            windowMoves(screenCount: 1),
+            ["Maximize", "Make Larger", "Make Smaller", "Left Half", "Right Half", "Restore"]
+        )
 
         // Nor does searching surface something that could not work.
         let found = CommandCatalog.rootEntries(

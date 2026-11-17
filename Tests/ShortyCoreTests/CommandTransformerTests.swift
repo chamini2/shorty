@@ -236,4 +236,16 @@ final class CommandTransformerTests: XCTestCase {
         XCTAssertEqual(results[0].displayText, "hello world")
         XCTAssertEqual(results[0].resultText, "hi there")
     }
+
+    /// `utc time` and its friends are gone: zones are a list you browse under
+    /// Time, so `CommandTransformerEngine.currentTime` is what fills the rows.
+    func testCurrentTimeSpellsOutTheOffset() {
+        let now = Date(timeIntervalSince1970: 0)
+        let tokyo = TimeZone(identifier: "Asia/Tokyo")!
+
+        XCTAssertEqual(
+            CommandTransformerEngine.currentTime(in: tokyo, now: now),
+            "1970-01-01 09:00:00 UTC+9"
+        )
+    }
 }
