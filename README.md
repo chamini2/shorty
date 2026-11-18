@@ -150,7 +150,9 @@ the search box needs for deleting to the start of the line.
 - Previews a copied link in the detail pane: the same card a social site
   unfurls, built from the page's own `og:` tags, with its picture, title and
   summary. Reading a link means fetching it, so this happens only for the
-  entry you select and each answer is kept for the session. A page that says
+  entry you select, and each answer is kept on disk for a week, so a link
+  seen before shows its card at once and never asks the site again. A page
+  with no picture of its own shows the site's icon. A page that says
   nothing about itself shows no card. Turn it off with:
 
   ```yaml

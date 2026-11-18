@@ -20,15 +20,36 @@ final class LinkPreviewLoader {
     private var cache: [URL: Result] = [:]
     private var tasks: [URL: Task<Void, Never>] = [:]
     private var waiting: [URL: [(Result) -> Void]] = [:]
+    private let store: LinkCardStore
 
+    init(store: LinkCardStore = LinkCardStore()) {
+        self.store = store
+    }
+
+    /// What is already known: this session's answers first, then the ones
+    /// kept on disk from earlier runs.
     func cached(for url: URL) -> Result? {
-        cache[url]
+        if let result = cache[url] {
+            return result
+        }
+
+        guard let record = store.record(for: url) else {
+            return nil
+        }
+
+        let result: Result = record.failed
+            ? .unavailable
+            : .card(record.card(for: url), image: store.imageData(for: record).flatMap(NSImage.init(data:)))
+
+        cache[url] = result
+
+        return result
     }
 
     /// Calls back on the main actor, once, for every caller that asked.
     func load(_ url: URL, completion: @escaping (Result) -> Void) {
-        if let cached = cache[url] {
-            completion(cached)
+        if let known = cached(for: url) {
+            completion(known)
             return
         }
 
@@ -60,6 +81,8 @@ final class LinkPreviewLoader {
             result = .unavailable
         }
 
+        // Kept on disk as well, so the next run of the app already knows.
+        store.save(fetched?.card, imageData: fetched?.imageData, for: url)
         cache[url] = result
         let handlers = waiting.removeValue(forKey: url) ?? []
         handlers.forEach { $0(result) }
@@ -88,11 +111,13 @@ final class LinkPreviewLoader {
             return nil
         }
 
-        guard let imageURL = card.imageURL else {
+        // The page's own picture when it has one, its icon when it does not:
+        // a card with a site's mark still reads better than a bare address.
+        guard let pictureURL = card.pictureURL else {
             return FetchedCard(card: card, imageData: nil)
         }
 
-        return FetchedCard(card: card, imageData: await imageData(at: imageURL))
+        return FetchedCard(card: card, imageData: await imageData(at: pictureURL))
     }
 
     private static func html(at url: URL) async -> String? {

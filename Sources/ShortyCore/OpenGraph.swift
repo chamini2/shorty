@@ -8,25 +8,35 @@ public struct LinkCard: Equatable, Sendable {
     public let summary: String?
     public let siteName: String?
     public let imageURL: URL?
+    /// The site's own icon, for pages that offer no picture of their own.
+    public let iconURL: URL?
 
     public init(
         url: URL,
         title: String? = nil,
         summary: String? = nil,
         siteName: String? = nil,
-        imageURL: URL? = nil
+        imageURL: URL? = nil,
+        iconURL: URL? = nil
     ) {
         self.url = url
         self.title = title
         self.summary = summary
         self.siteName = siteName
         self.imageURL = imageURL
+        self.iconURL = iconURL
     }
 
     /// A page that said nothing about itself. Showing an empty card would be
-    /// worse than showing the address alone.
+    /// worse than showing the address alone, and an icon is not something a
+    /// page said: every site has one.
     public var isEmpty: Bool {
         title == nil && summary == nil && imageURL == nil
+    }
+
+    /// What the card should show: the page's own picture, or its icon.
+    public var pictureURL: URL? {
+        imageURL ?? iconURL
     }
 }
 
@@ -54,9 +64,42 @@ public enum OpenGraphParser {
             siteName: siteName,
             // Pages are free to write `/card.png`, which only means anything
             // against the page it came from.
-            imageURL: image.flatMap { URL(string: $0, relativeTo: url)?.absoluteURL }
+            imageURL: image.flatMap { URL(string: $0, relativeTo: url)?.absoluteURL },
+            iconURL: iconURL(in: html, from: url)
         )
     }
+
+    /// The best icon the page declares, falling back to where every site
+    /// keeps one anyway. Bigger is better here: the card draws it at a size
+    /// a 16 pixel favicon cannot fill.
+    private static func iconURL(in html: String, from url: URL) -> URL? {
+        var best: (size: Int, href: String)?
+
+        for tag in matches(of: linkPattern, in: html) {
+            let attributes = self.attributes(in: tag)
+
+            guard let relation = attributes["rel"]?.lowercased(),
+                  iconRelations.contains(where: relation.contains),
+                  let href = attributes["href"], !href.isEmpty else {
+                continue
+            }
+
+            // `sizes="180x180"`, when the page bothers to say.
+            let size = attributes["sizes"]
+                .flatMap { $0.split(whereSeparator: { !$0.isNumber }).first }
+                .flatMap { Int($0) } ?? 0
+
+            if best == nil || size > best!.size {
+                best = (size, href)
+            }
+        }
+
+        let href = best?.href ?? "/favicon.ico"
+
+        return URL(string: href, relativeTo: url)?.absoluteURL
+    }
+
+    private static let iconRelations = ["icon", "apple-touch-icon"]
 
     /// Every `<meta>` in the document, keyed by its `property` or `name`.
     /// First one wins: a page repeating `og:image` is listing alternatives,
@@ -152,6 +195,7 @@ public enum OpenGraphParser {
     }
 
     private static let metaPattern = "<meta\\b[^>]*>"
+    private static let linkPattern = "<link\\b[^>]*>"
     private static let titlePattern = "<title\\b[^>]*>.*?</title>"
     private static let attributePattern = "([a-zA-Z:_-]+)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'>]+))"
 }

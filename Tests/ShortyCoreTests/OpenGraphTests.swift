@@ -92,6 +92,34 @@ final class OpenGraphTests: XCTestCase {
         XCTAssertEqual(result.imageURL, URL(string: "https://cdn.example.com/first.png"))
     }
 
+    func testPrefersTheLargestIconThePageDeclares() {
+        let result = card("""
+        <link rel="icon" href="/small.png" sizes="16x16">
+        <link rel="apple-touch-icon" href="/big.png" sizes="180x180">
+        """)
+
+        XCTAssertEqual(result.iconURL, URL(string: "https://example.com/big.png"))
+    }
+
+    func testFallsBackToWhereEverySiteKeepsAnIcon() {
+        XCTAssertEqual(card("<head><title>X</title></head>").iconURL, URL(string: "https://example.com/favicon.ico"))
+    }
+
+    func testThePictureIsTheImageWhenThereIsOneAndTheIconOtherwise() {
+        let withImage = card("""
+        <meta property="og:image" content="https://cdn.example.com/card.png">
+        <link rel="icon" href="/icon.png">
+        """)
+
+        XCTAssertEqual(withImage.pictureURL, URL(string: "https://cdn.example.com/card.png"))
+        XCTAssertEqual(card(#"<link rel="icon" href="/icon.png">"#).pictureURL, URL(string: "https://example.com/icon.png"))
+    }
+
+    func testAnIconAloneIsStillAnEmptyCard() {
+        // Every site has an icon; it is not something the page said.
+        XCTAssertTrue(card(#"<link rel="icon" href="/icon.png">"#).isEmpty)
+    }
+
     func testAPageThatSaysNothingIsEmpty() {
         XCTAssertTrue(card("<html><body><p>Words on a page</p></body></html>").isEmpty)
         // A site name alone is not a card: it is only the address restated.
