@@ -142,6 +142,10 @@ the search box needs for deleting to the start of the line.
 - Keeps plain text and rich text (RTF, HTML, etc.).
 - Keeps copied images, up to 10 MB each, beside the history in `ClipboardAssets/`. Pasting writes the image data, not a file path.
 - Keeps copied files as paths rather than copies, so pasting hands over the file itself. An entry whose file has moved says so and is skipped.
+- Skips anything the copier marked private: `org.nspasteboard.ConcealedType`,
+  which password managers and Keychain Access set on a copied secret, and the
+  transient markers apps use for text a person never typed. Those copies are
+  not read off the pasteboard at all.
 - Records which app a copy came from, by the front window rather than the frontmost app, so an overlay such as a terminal hotkey window is credited correctly.
 - Previews a copied link in the detail pane: the same card a social site
   unfurls, built from the page's own `og:` tags, with its picture, title and
