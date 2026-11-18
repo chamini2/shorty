@@ -159,7 +159,9 @@ private final class FittedImageView: NSView {
             return
         }
 
-        let scale = min(bounds.width / size.width, bounds.height / size.height)
+        // Never past its own size: a favicon blown up to fill the column
+        // would only be a blur of itself.
+        let scale = min(min(bounds.width / size.width, bounds.height / size.height), 1)
         let drawn = NSSize(width: size.width * scale, height: size.height * scale)
 
         image.draw(
