@@ -97,6 +97,7 @@ Rectangle-style hotkeys for the focused window:
 | `ctrl+option+left` | Left half of the current monitor. If already there, right half of the monitor to the left (wraps). |
 | `ctrl+option+right` | Right half of the current monitor. If already there, left half of the monitor to the right (wraps). |
 | `ctrl+option+cmd+up` | Maximize to the current monitor |
+| _(unbound)_ | `almost-maximize`: nine tenths of the monitor, centred |
 | `ctrl+option+cmd+left` | Move to the monitor on the left, keeping proportional position and size (wraps) |
 | `ctrl+option+cmd+right` | Move to the monitor on the right, keeping proportional position and size (wraps) |
 
@@ -206,7 +207,7 @@ Entries that take you somewhere carry a `›`:
 | --- | --- |
 | `Clipboard History ›` | the picker, with its previews and paste keys |
 | `Time ›` | the current time in each configured zone |
-| `Window ›` | `Maximize`, `Make Larger`, `Make Smaller`, the halves, the monitor moves when a second display is attached, and `Restore` |
+| `Window ›` | `Maximize`, `Almost Maximize`, `Make Larger`, `Make Smaller`, the halves, the monitor moves when a second display is attached, and `Restore` |
 | `Keep the Mac Awake` | holds off idle and display sleep, like `caffeinate` |
 
 Typing a timestamp or a size converts it, above the commands:
@@ -245,6 +246,7 @@ hotkeys:
     left-half: ctrl+option+left
     right-half: ctrl+option+right
     maximize: ctrl+option+cmd+up
+    almost-maximize: ctrl+option+cmd+return
     left-monitor: ctrl+option+cmd+left
     right-monitor: ctrl+option+cmd+right
 ```

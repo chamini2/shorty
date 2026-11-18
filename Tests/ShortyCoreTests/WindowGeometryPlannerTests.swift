@@ -244,6 +244,34 @@ final class WindowGeometryPlannerTests: XCTestCase {
         XCTAssertEqual(WindowGeometryPlanner.maximizeFrame(on: screen), screen)
     }
 
+    func testAlmostMaximizeLeavesAnEvenMarginOnTheCurrentScreen() {
+        let screen = CGRect(x: 100, y: 50, width: 1000, height: 800)
+        let frame = WindowGeometryPlanner.almostMaximizeFrame(on: screen)
+
+        XCTAssertEqual(frame, CGRect(x: 150, y: 90, width: 900, height: 720))
+        XCTAssertEqual(frame.minX - screen.minX, screen.maxX - frame.maxX)
+        XCTAssertEqual(frame.minY - screen.minY, screen.maxY - frame.maxY)
+    }
+
+    func testAlmostMaximizeStaysOnTheDisplayItWasGiven() {
+        // A second display sits at an offset, so the margin cannot be
+        // measured from the origin.
+        let screen = CGRect(x: 1512, y: -180, width: 2560, height: 1440)
+        let frame = WindowGeometryPlanner.almostMaximizeFrame(on: screen)
+
+        XCTAssertTrue(screen.contains(frame))
+        XCTAssertEqual(frame.midX, screen.midX)
+        XCTAssertEqual(frame.midY, screen.midY)
+    }
+
+    func testAlmostMaximizeDoesNotCreepWhenRepeated() {
+        let screen = CGRect(x: 0, y: 25, width: 1512, height: 945)
+        let once = WindowGeometryPlanner.almostMaximizeFrame(on: screen)
+
+        XCTAssertEqual(WindowGeometryPlanner.almostMaximizeFrame(on: screen), once)
+        XCTAssertEqual(once.width, (screen.width * 0.9).rounded())
+    }
+
     func testAccessibilityFrameConvertsAppKitVisibleFrameToTopLeftCoordinates() {
         let screenFrame = CGRect(x: 0, y: 0, width: 1000, height: 800)
         let visibleFrame = CGRect(x: 0, y: 60, width: 1000, height: 710)

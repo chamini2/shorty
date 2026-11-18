@@ -193,6 +193,12 @@ public enum CommandCatalog {
     private static func windowEntries(screenCount: Int) -> [CommandEntry] {
         var entries = [
             windowEntry("maximize", "Maximize", .maximize, ["full", "fill"]),
+            windowEntry(
+                "almost-maximize",
+                "Almost Maximize",
+                .almostMaximize,
+                ["nearly", "centre", "center", "big"]
+            ),
             windowEntry("larger", "Make Larger", .resize(sizeStep), ["bigger", "grow", "expand", "wider"]),
             windowEntry("smaller", "Make Smaller", .resize(-sizeStep), ["shrink", "reduce", "narrower"]),
             windowEntry("left-half", "Left Half", .cycleHalf(.left), ["half", "split"]),

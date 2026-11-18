@@ -5,6 +5,8 @@ import Foundation
 public enum WindowMoveCommand: Equatable, Sendable {
     case cycleHalf(WindowMoveDirection)
     case maximize
+    /// Maximize but leave a margin, so the window still reads as a window.
+    case almostMaximize
     case moveToMonitor(WindowMoveDirection)
     /// Grow or shrink by a share of the display.
     case resize(CGFloat)
@@ -171,13 +173,17 @@ public final class WindowMover {
                 screens: screens,
                 direction: direction
             )
-        case .maximize:
+        case .maximize, .almostMaximize:
             let orderedScreens = WindowGeometryPlanner.orderedScreens(screens)
             guard let screenIndex = WindowGeometryPlanner.screenIndex(containing: currentFrame, screens: orderedScreens) else {
                 return nil
             }
 
-            return WindowGeometryPlanner.maximizeFrame(on: orderedScreens[screenIndex])
+            let screen = orderedScreens[screenIndex]
+
+            return command == .maximize
+                ? WindowGeometryPlanner.maximizeFrame(on: screen)
+                : WindowGeometryPlanner.almostMaximizeFrame(on: screen)
         case let .moveToMonitor(direction):
             return WindowGeometryPlanner.monitorMoveFrame(
                 for: currentFrame,

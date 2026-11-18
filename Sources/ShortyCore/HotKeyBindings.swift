@@ -11,6 +11,8 @@ public struct HotKeyBindings: Equatable, Sendable {
     public var moveWindowLeftHalf: KeyCombo?
     public var moveWindowRightHalf: KeyCombo?
     public var maximizeWindow: KeyCombo?
+    /// Unbound unless asked for: the command box reaches it without a key.
+    public var almostMaximizeWindow: KeyCombo?
     public var moveWindowToLeftMonitor: KeyCombo?
     public var moveWindowToRightMonitor: KeyCombo?
 
@@ -23,6 +25,7 @@ public struct HotKeyBindings: Equatable, Sendable {
         moveWindowLeftHalf: KeyCombo? = nil,
         moveWindowRightHalf: KeyCombo? = nil,
         maximizeWindow: KeyCombo? = nil,
+        almostMaximizeWindow: KeyCombo? = nil,
         moveWindowToLeftMonitor: KeyCombo? = nil,
         moveWindowToRightMonitor: KeyCombo? = nil
     ) {
@@ -34,6 +37,7 @@ public struct HotKeyBindings: Equatable, Sendable {
         self.moveWindowLeftHalf = moveWindowLeftHalf
         self.moveWindowRightHalf = moveWindowRightHalf
         self.maximizeWindow = maximizeWindow
+        self.almostMaximizeWindow = almostMaximizeWindow
         self.moveWindowToLeftMonitor = moveWindowToLeftMonitor
         self.moveWindowToRightMonitor = moveWindowToRightMonitor
     }
@@ -71,6 +75,7 @@ public struct HotKeyBindings: Equatable, Sendable {
         append(HotKeyBindingName.moveWindowLeftHalf, moveWindowLeftHalf)
         append(HotKeyBindingName.moveWindowRightHalf, moveWindowRightHalf)
         append(HotKeyBindingName.maximizeWindow, maximizeWindow)
+        append(HotKeyBindingName.almostMaximizeWindow, almostMaximizeWindow)
         append(HotKeyBindingName.moveWindowToLeftMonitor, moveWindowToLeftMonitor)
         append(HotKeyBindingName.moveWindowToRightMonitor, moveWindowToRightMonitor)
 
@@ -93,6 +98,7 @@ public struct HotKeyBindings: Equatable, Sendable {
         moveWindowLeftHalf != nil ||
             moveWindowRightHalf != nil ||
             maximizeWindow != nil ||
+            almostMaximizeWindow != nil ||
             moveWindowToLeftMonitor != nil ||
             moveWindowToRightMonitor != nil
     }
@@ -109,6 +115,7 @@ public enum HotKeyBindingName {
     public static let moveWindowLeftHalf = "window-movement.left-half"
     public static let moveWindowRightHalf = "window-movement.right-half"
     public static let maximizeWindow = "window-movement.maximize"
+    public static let almostMaximizeWindow = "window-movement.almost-maximize"
     public static let moveWindowToLeftMonitor = "window-movement.left-monitor"
     public static let moveWindowToRightMonitor = "window-movement.right-monitor"
 }
