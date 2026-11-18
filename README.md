@@ -149,8 +149,10 @@ the search box needs for deleting to the start of the line.
 - Records which app a copy came from, by the front window rather than the frontmost app, so an overlay such as a terminal hotkey window is credited correctly.
 - Previews a copied link in the detail pane: the same card a social site
   unfurls, built from the page's own `og:` tags, with its picture, title and
-  summary. Reading a link means fetching it, so this happens only for the
-  entry you select, and each answer is kept on disk for a week, so a link
+  summary. Reading a link means fetching it, so this happens for the
+  link as it is copied, and for the opening stretch of the list when the
+  picker opens, so the card is usually there before it is asked for. Three
+  requests run at a time. Each answer is kept on disk for a week, so a link
   seen before shows its card at once and never asks the site again. A page
   with no picture of its own shows the site's icon. A page that says
   nothing about itself shows no card. Turn it off with:

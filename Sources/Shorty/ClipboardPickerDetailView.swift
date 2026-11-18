@@ -252,6 +252,16 @@ final class ClipboardPickerDetailView: NSView {
         return container
     }
 
+    /// Reads the cards for links the list is showing, before any of them is
+    /// selected. Nothing is drawn: the answers are put away for when they are.
+    func prefetch(_ urls: [URL]) {
+        guard showsLinkPreviews else {
+            return
+        }
+
+        linkPreviews.prefetch(urls)
+    }
+
     /// Shows the card the site offers once it answers, leaving the address on
     /// screen until then, and never replacing a pane the selection has moved
     /// on from.

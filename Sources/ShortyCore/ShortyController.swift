@@ -14,6 +14,11 @@ public final class ShortyController {
     public var commandBoxSettingsHandler: ((CommandBoxSettings) -> Void)?
     public var windowSwitcherHandler: ((WindowSwitcherUpdate) -> Void)?
     public var permissionRequestHandler: ((ShortyPermissionPane) -> Void)?
+    /// Every copy as it lands, for work that is better started early.
+    public var clipboardCaptureHandler: ((ClipboardItem) -> Void)? {
+        get { clipboardMonitor.didCapture }
+        set { clipboardMonitor.didCapture = newValue }
+    }
     public private(set) var loadedShortcuts: [LoadedShortcut] = []
     public private(set) var loadedSnippetGroups: [SnippetGroup] = []
     public private(set) var loadedBindings: HotKeyBindings = .default

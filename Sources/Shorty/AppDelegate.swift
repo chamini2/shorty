@@ -46,6 +46,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.showCommandPalette()
             }
         }
+        // A copied link is read the moment it lands, so its card is waiting
+        // by the time the picker is opened at all.
+        controller.clipboardCaptureHandler = { [weak self] item in
+            DispatchQueue.main.async {
+                self?.prefetchLinkPreview(for: item)
+            }
+        }
         commandPalettePanel.pickerRequestHandler = { [weak self] kind in
             self?.showCommandInsertionPicker(kind)
         }
@@ -293,6 +300,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The menu bar cup fills while sleep is held off and empties when it is
     /// not, which says the same thing as the tick in the menu below it.
+    /// Reads a copied link's card straight away. The setting is honoured
+    /// here too: with previews off, nothing is fetched at all.
+    private func prefetchLinkPreview(for item: ClipboardItem) {
+        guard controller.loadedClipboardSettings.linkPreviewsEnabled,
+              ClipboardItemDetailBuilder.isLink(item.plainText),
+              let url = URL(string: item.plainText.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return
+        }
+
+        clipboardPickerPanel.prefetchLinkPreviews([url])
+    }
+
     private func updateKeepAwakeIndicator() {
         let active = controller.isKeepAwakeActive
         keepAwakeItem.state = active ? .on : .off

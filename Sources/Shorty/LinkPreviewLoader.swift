@@ -20,6 +20,8 @@ final class LinkPreviewLoader {
     private var cache: [URL: Result] = [:]
     private var tasks: [URL: Task<Void, Never>] = [:]
     private var waiting: [URL: [(Result) -> Void]] = [:]
+    /// Links to read when there is room, newest first.
+    private var queued: [URL] = []
     private let store: LinkCardStore
 
     init(store: LinkCardStore = LinkCardStore()) {
@@ -70,6 +72,42 @@ final class LinkPreviewLoader {
         }
     }
 
+    /// Reads links nobody has asked for yet, because the answers outlive the
+    /// session now: by the time an entry is selected its card is usually
+    /// already here, and a card read once is read for the week.
+    ///
+    /// A few at a time, in the order the list shows them, so opening the
+    /// picker on a long history does not fire off a hundred requests.
+    func prefetch(_ urls: [URL]) {
+        let wanted = urls.filter { cached(for: $0) == nil && tasks[$0] == nil }
+
+        for url in wanted where !queued.contains(url) {
+            queued.append(url)
+        }
+
+        startQueued()
+    }
+
+    private func startQueued() {
+        while tasks.count < Self.maximumConcurrentFetches, !queued.isEmpty {
+            let url = queued.removeFirst()
+
+            guard cached(for: url) == nil, tasks[url] == nil else {
+                continue
+            }
+
+            tasks[url] = Task { [weak self] in
+                let fetched = await Self.fetch(url)
+
+                guard let self else {
+                    return
+                }
+
+                self.finish(url, with: fetched)
+            }
+        }
+    }
+
     private func finish(_ url: URL, with fetched: FetchedCard?) {
         tasks[url] = nil
 
@@ -86,12 +124,14 @@ final class LinkPreviewLoader {
         cache[url] = result
         let handlers = waiting.removeValue(forKey: url) ?? []
         handlers.forEach { $0(result) }
+        startQueued()
     }
 
     func cancelAll() {
         tasks.values.forEach { $0.cancel() }
         tasks.removeAll()
         waiting.removeAll()
+        queued.removeAll()
     }
 
     /// Carried back to the main actor: bytes and a card, never a drawn image.
@@ -161,6 +201,9 @@ final class LinkPreviewLoader {
         return request
     }
 
+    /// Enough to keep a list moving, few enough to be a polite guest on
+    /// someone else's server.
+    private static let maximumConcurrentFetches = 3
     private static let timeout: TimeInterval = 6
     /// Enough for any `<head>` worth reading.
     private static let headByteLimit = 256 * 1024
