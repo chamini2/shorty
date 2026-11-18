@@ -6,6 +6,8 @@ import UniformTypeIdentifiers
 @MainActor
 final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     private enum Metrics {
+        /// How far down the list cards are read ahead.
+        static let prefetchedLinks = 20
         static let panelWidth: CGFloat = 820
         static let listWidth: CGFloat = 320
         static let dividerWidth: CGFloat = 1
@@ -398,6 +400,37 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         tableView.reloadData()
         syncTableWidth()
         selectCurrentRow(anchorContextAbove: true)
+        prefetchLinkPreviews()
+    }
+
+    /// The cards for the links on screen, fetched before they are asked for.
+    /// Only the opening stretch of the list: further down is scrolling the
+    /// user has not done, and the cards keep for a week once read.
+    func prefetchLinkPreviews(_ urls: [URL]) {
+        guard showsLinkPreviews else {
+            return
+        }
+
+        detailView.prefetch(urls)
+    }
+
+    private func prefetchLinkPreviews() {
+        guard showsLinkPreviews else {
+            return
+        }
+
+        let urls = entries
+            .prefix(Metrics.prefetchedLinks)
+            .compactMap { entry -> URL? in
+                guard case let .history(item) = entry,
+                      ClipboardItemDetailBuilder.isLink(item.plainText) else {
+                    return nil
+                }
+
+                return URL(string: item.plainText.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+
+        detailView.prefetch(urls)
     }
 
     private func resizePanelForCurrentEntries() {

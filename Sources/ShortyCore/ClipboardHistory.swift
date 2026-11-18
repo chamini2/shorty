@@ -675,6 +675,9 @@ public final class ClipboardMonitor: NSObject {
     private let pollInterval: TimeInterval
     private var timer: Timer?
     private var cachedChangeCount: Int
+    /// Told about every copy as it lands, so the app can get a head start on
+    /// whatever the item needs looked up.
+    public var didCapture: ((ClipboardItem) -> Void)?
 
     public init(
         store: ClipboardHistoryStore,
@@ -735,6 +738,7 @@ public final class ClipboardMonitor: NSObject {
         }
 
         store.add(item)
+        didCapture?(item)
     }
 }
 
