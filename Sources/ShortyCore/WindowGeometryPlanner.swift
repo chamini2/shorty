@@ -77,6 +77,27 @@ public enum WindowGeometryPlanner {
         screen.standardized
     }
 
+    /// Maximize with a margin left around it, so what is behind stays in
+    /// sight. Rounded to whole points: a window placed on a half point is a
+    /// window drawn blurry.
+    public static func almostMaximizeFrame(on screen: CGRect, share: CGFloat = almostMaximizeShare) -> CGRect {
+        let screen = screen.standardized
+        let size = CGSize(
+            width: (screen.width * share).rounded(),
+            height: (screen.height * share).rounded()
+        )
+
+        return CGRect(
+            x: (screen.midX - size.width / 2).rounded(),
+            y: (screen.midY - size.height / 2).rounded(),
+            width: size.width,
+            height: size.height
+        )
+    }
+
+    /// How much of the display "almost" is.
+    public static let almostMaximizeShare: CGFloat = 0.9
+
     public static func accessibilityFrame(
         screenFrame: CGRect,
         visibleFrame: CGRect,

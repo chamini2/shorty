@@ -230,6 +230,7 @@ public final class ShortyController {
             (loadedBindings.moveWindowLeftHalf, .cycleHalf(.left)),
             (loadedBindings.moveWindowRightHalf, .cycleHalf(.right)),
             (loadedBindings.maximizeWindow, .maximize),
+            (loadedBindings.almostMaximizeWindow, .almostMaximize),
             (loadedBindings.moveWindowToLeftMonitor, .moveToMonitor(.left)),
             (loadedBindings.moveWindowToRightMonitor, .moveToMonitor(.right)),
         ]

@@ -126,6 +126,8 @@ public enum HotKeyBindingsParser {
                     bindings.moveWindowRightHalf = try combo(from: pair.value, name: name)
                 case "maximize":
                     bindings.maximizeWindow = try combo(from: pair.value, name: name)
+                case "almost-maximize":
+                    bindings.almostMaximizeWindow = try combo(from: pair.value, name: name)
                 case "left-monitor":
                     bindings.moveWindowToLeftMonitor = try combo(from: pair.value, name: name)
                 case "right-monitor":
@@ -147,6 +149,7 @@ public enum HotKeyBindingsParser {
         bindings.moveWindowLeftHalf = nil
         bindings.moveWindowRightHalf = nil
         bindings.maximizeWindow = nil
+        bindings.almostMaximizeWindow = nil
         bindings.moveWindowToLeftMonitor = nil
         bindings.moveWindowToRightMonitor = nil
     }
