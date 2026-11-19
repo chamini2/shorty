@@ -6,7 +6,6 @@ import ShortyCore
 final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFieldDelegate {
     private enum Metrics {
         static let panelWidth: CGFloat = 820
-        static let panelHeight: CGFloat = 440
         static let topPadding: CGFloat = 9
         static let emptyBottomPadding: CGFloat = 10
         static let resultBottomPadding: CGFloat = 5

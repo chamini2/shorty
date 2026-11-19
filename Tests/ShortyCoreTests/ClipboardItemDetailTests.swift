@@ -90,7 +90,7 @@ final class ClipboardItemDetailTests: XCTestCase {
         )
     }
 
-    func testFolderDetailListsWhatIsInside() throws {
+    func testFolderDetailListsNamesWithoutContents() throws {
         let folder = ClipboardPickerFolder(
             id: "snippets:Work",
             title: "Work",
@@ -108,8 +108,8 @@ final class ClipboardItemDetailTests: XCTestCase {
         XCTAssertEqual(
             detail.body,
             """
-            Greeting  —  Hello from Shorty.
-            Multi  —  first line
+            Greeting
+            Multi
             Same
             """
         )

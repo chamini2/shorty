@@ -82,8 +82,14 @@ final class ClipboardPickerDetailView: NSView {
         bodyTextView.textColor = NSColor(calibratedWhite: 0.92, alpha: 1)
         bodyTextView.font = NSFont.monospacedSystemFont(ofSize: Metrics.bodyFontSize, weight: .regular)
         bodyTextView.textContainerInset = NSSize(width: 0, height: 0)
+        // A bare NSTextView starts zero-sized; without tracking the clip
+        // view's width its text wraps into a 0pt column and never shows.
+        bodyTextView.minSize = .zero
+        bodyTextView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         bodyTextView.isVerticallyResizable = true
         bodyTextView.isHorizontallyResizable = false
+        bodyTextView.autoresizingMask = [.width]
+        bodyTextView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         bodyTextView.textContainer?.widthTracksTextView = true
 
         imageView.translatesAutoresizingMaskIntoConstraints = false

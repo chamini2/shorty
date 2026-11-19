@@ -133,49 +133,16 @@ public enum ClipboardItemDetailBuilder {
         )
     }
 
-    /// What a folder holds, so selecting one previews its contents rather than
-    /// only counting them. Each line pairs the name with the start of its text.
+    /// Names what a folder holds without showing any contents, since snippets
+    /// can hold secrets and a folder is often selected only in passing.
     private static func folderListing(of entries: [ClipboardPickerEntry]) -> String {
         entries
             .prefix(maxFolderPreviewItems)
-            .map { entry in
-                let title = entry.title
-                guard let preview = firstLine(of: entry), preview != title else {
-                    return title
-                }
-
-                return "\(title)  —  \(preview)"
-            }
+            .map(\.title)
             .joined(separator: "\n")
     }
 
-    private static func firstLine(of entry: ClipboardPickerEntry) -> String? {
-        let text: String
-
-        switch entry.pasteResult {
-        case let .snippet(_, snippet):
-            text = snippet.content
-        case let .history(item):
-            text = item.previewText
-        case .none:
-            return nil
-        }
-
-        let line = text
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .first
-            .map(String.init)?
-            .trimmingCharacters(in: .whitespaces) ?? ""
-
-        guard !line.isEmpty else {
-            return nil
-        }
-
-        return line.shortyTruncated(maxLength: maxFolderPreviewLineLength)
-    }
-
     private static let maxFolderPreviewItems = 30
-    private static let maxFolderPreviewLineLength = 80
 
     public static func byteLabel(_ bytes: Int) -> String {
         let formatter = ByteCountFormatter()

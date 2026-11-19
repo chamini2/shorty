@@ -33,7 +33,7 @@ extension ShortyBoxContent {
 final class ShortyBoxController: NSObject, NSWindowDelegate {
     enum Metrics {
         static let width: CGFloat = 820
-        static let height: CGFloat = 440
+        static let height: CGFloat = 520
         static let cornerRadius: CGFloat = 8
         static let topOffsetRatio: CGFloat = 0.20
         static let bottomMargin: CGFloat = 20

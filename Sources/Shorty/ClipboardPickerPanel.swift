@@ -8,7 +8,6 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     private enum Metrics {
         static let panelWidth: CGFloat = 820
         static let listWidth: CGFloat = 320
-        static let panelHeight: CGFloat = 440
         static let dividerWidth: CGFloat = 1
         /// How far down the viewport the opening selection sits.
         static let selectionContextRatio: CGFloat = 0.25
@@ -27,7 +26,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         static let iconLeading: CGFloat = 0
         static let textSpacing: CGFloat = 4
         static let trailingPadding: CGFloat = 30
-        static let headerLeading: CGFloat = -8
+        static let headerLeading: CGFloat = 0
         static let disclosureSize: CGFloat = 12
         static let disclosureTrailing: CGFloat = 24
         static let disclosureSpacing: CGFloat = 8
