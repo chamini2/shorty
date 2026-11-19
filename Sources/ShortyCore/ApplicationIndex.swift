@@ -26,16 +26,15 @@ public struct InstalledApplication: Equatable, Sendable, Identifiable {
 /// known, the answer is wanted in a few milliseconds while the box is opening,
 /// and a query to the metadata server can take far longer than that.
 public enum ApplicationScanner {
-    /// Where macOS keeps apps. CoreServices is included for Finder and the
-    /// handful of real apps beside it.
+    /// Where macOS keeps apps people open. `CoreServices` is left out: it
+    /// holds a hundred pieces of system machinery and a couple of real apps,
+    /// and the machinery is only noise in a list you search by name.
     public static var defaultDirectories: [URL] {
         var directories = [
             "/Applications",
             "/Applications/Utilities",
             "/System/Applications",
             "/System/Applications/Utilities",
-            "/System/Library/CoreServices",
-            "/System/Library/CoreServices/Applications",
             // Safari and its kin ship in a cryptex. `/Applications/Safari.app`
             // is only a link into here, and a directory listing does not
             // report it.
