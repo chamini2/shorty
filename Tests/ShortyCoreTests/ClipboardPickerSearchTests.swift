@@ -72,9 +72,9 @@ final class ClipboardPickerSearchTests: XCTestCase {
             mode: .all
         )
 
-        XCTAssertEqual(entries.map(\.title), ["History", "Deep needle", "Snippets", "Greeting"])
-        XCTAssertEqual(entries[1].pasteResult, .history(history[24]))
-        XCTAssertEqual(entries[3].pasteResult, .snippet(groupTitle: "Work", snippet: groups[0].snippets[0]))
+        XCTAssertEqual(entries.map(\.title), ["Snippets", "Greeting", "History", "Deep needle"])
+        XCTAssertEqual(entries[1].pasteResult, .snippet(groupTitle: "Work", snippet: groups[0].snippets[0]))
+        XCTAssertEqual(entries[3].pasteResult, .history(history[24]))
     }
 
     func testRootSearchKeepsMatchingFoldersOpenable() throws {
@@ -97,73 +97,50 @@ final class ClipboardPickerSearchTests: XCTestCase {
         XCTAssertNotNil(entries[1].folder)
     }
 
-    func testHistoryTitlesUsePickerCutoffInsteadOfMenuCutoff() {
+    func testHistoryTitlesUsePickerCutoffInsteadOfMenuCutoff() throws {
         let longText = String(repeating: "a", count: ClipboardConstants.maxMenuItemTitleLength + 20)
-        let entries = ClipboardPickerSearch.rootEntries(
-            history: [ClipboardItem(plainText: longText)],
-            snippetGroups: [],
-            query: "",
-            mode: .all
-        )
 
-        XCTAssertEqual(entries[1].title, longText)
+        XCTAssertEqual(try onlyHistoryEntry(for: longText).title, longText)
     }
 
     func testHistoryPresentationSeparatesLineCountMarker() throws {
-        let item = ClipboardItem(plainText: "First line\nSecond line\nThird line")
-        let entries = ClipboardPickerSearch.rootEntries(
-            history: [item],
-            snippetGroups: [],
-            query: "",
-            mode: .all
-        )
-        let presentation = entries[1].presentation
+        let entry = try onlyHistoryEntry(for: "First line\nSecond line\nThird line")
 
-        XCTAssertEqual(presentation.title, "First line")
-        XCTAssertEqual(presentation.trailingLineCountLabel, "+2")
-        XCTAssertEqual(entries[1].title, "First line")
+        XCTAssertEqual(entry.presentation.title, "First line")
+        XCTAssertEqual(entry.presentation.trailingLineCountLabel, "+2")
+        XCTAssertEqual(entry.title, "First line")
     }
 
     func testHistoryPresentationOmitsLineCountMarkerForSingleLineItems() throws {
-        let item = ClipboardItem(plainText: "Only line")
-        let entries = ClipboardPickerSearch.rootEntries(
-            history: [item],
-            snippetGroups: [],
-            query: "",
-            mode: .all
-        )
-        let presentation = entries[1].presentation
+        let entry = try onlyHistoryEntry(for: "Only line")
 
-        XCTAssertEqual(presentation.title, "Only line")
-        XCTAssertNil(presentation.trailingLineCountLabel)
+        XCTAssertEqual(entry.presentation.title, "Only line")
+        XCTAssertNil(entry.presentation.trailingLineCountLabel)
     }
 
     func testHistoryPresentationUsesFirstNonBlankLineAndCountsFollowingLines() throws {
-        let item = ClipboardItem(plainText: "\n\n  First content line\nSecond line")
-        let entries = ClipboardPickerSearch.rootEntries(
-            history: [item],
-            snippetGroups: [],
-            query: "",
-            mode: .all
-        )
-        let presentation = entries[1].presentation
+        let entry = try onlyHistoryEntry(for: "\n\n  First content line\nSecond line")
 
-        XCTAssertEqual(presentation.title, "  First content line")
-        XCTAssertEqual(presentation.trailingLineCountLabel, "+1")
+        XCTAssertEqual(entry.presentation.title, "  First content line")
+        XCTAssertEqual(entry.presentation.trailingLineCountLabel, "+1")
     }
 
     func testHistoryPresentationCountsCRLFAsSingleLineBreak() throws {
-        let item = ClipboardItem(plainText: "First line\r\nSecond line\r\nThird line")
+        let entry = try onlyHistoryEntry(for: "First line\r\nSecond line\r\nThird line")
+
+        XCTAssertEqual(entry.presentation.title, "First line")
+        XCTAssertEqual(entry.presentation.trailingLineCountLabel, "+2")
+    }
+
+    private func onlyHistoryEntry(for text: String) throws -> ClipboardPickerEntry {
         let entries = ClipboardPickerSearch.rootEntries(
-            history: [item],
+            history: [ClipboardItem(plainText: text)],
             snippetGroups: [],
             query: "",
             mode: .all
         )
-        let presentation = entries[1].presentation
 
-        XCTAssertEqual(presentation.title, "First line")
-        XCTAssertEqual(presentation.trailingLineCountLabel, "+2")
+        return try XCTUnwrap(entries.first { $0.pasteResult != nil })
     }
 
     func testActivationModeUsesCommandForCopyOnly() {

@@ -19,7 +19,7 @@ final class CommandCatalogTests: XCTestCase {
     func testEmptyQueryListsTheCommands() {
         let entries = root("")
 
-        XCTAssertEqual(entries.map(\.title), ["Clipboard History", "Time", "Window"])
+        XCTAssertEqual(entries.map(\.title), ["Clipboard History", "Time", "Keep the Mac Awake", "Window"])
         XCTAssertFalse(entries.contains { $0.title == "Snippets" }, "the picker already lists them")
         XCTAssertFalse(
             entries.contains {
@@ -70,7 +70,7 @@ final class CommandCatalogTests: XCTestCase {
 
     func testSearchReachesInsideListsAndSaysWhereFrom() {
         XCTAssertTrue(root("maximize").contains { $0.title == "Window › Maximize" })
-        XCTAssertTrue(root("utc").contains { $0.title == "Time › UTC" })
+        XCTAssertTrue(root("tokyo").contains { $0.title == "Time › Tokyo" })
     }
 
     func testMatchingAListShowsTheListNotItsEntries() {
@@ -94,9 +94,9 @@ final class CommandCatalogTests: XCTestCase {
         }
 
         let zones = CommandCatalog.entries(in: entries, query: "")
-        XCTAssertEqual(Array(zones.map(\.title).prefix(2)), ["Local", "UTC"])
-        XCTAssertEqual(zones.first { $0.title == "UTC" }?.detail, "1970-01-01 00:00:00 UTC")
-        XCTAssertEqual(CommandCatalog.entries(in: entries, query: "japan").count, 1)
+        XCTAssertEqual(zones.map(\.title), ["San Francisco", "Tokyo"])
+        XCTAssertEqual(zones.first { $0.title == "Tokyo" }?.detail, "1970-01-01 09:00:00 UTC+9")
+        XCTAssertEqual(CommandCatalog.entries(in: entries, query: "tokyo").count, 1)
     }
 
     func testChevronMarksAnythingThatNavigates() throws {

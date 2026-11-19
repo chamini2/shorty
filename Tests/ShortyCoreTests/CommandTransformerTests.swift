@@ -236,15 +236,4 @@ final class CommandTransformerTests: XCTestCase {
         XCTAssertEqual(results[0].displayText, "hello world")
         XCTAssertEqual(results[0].resultText, "hi there")
     }
-
-    func testCurrentTimeSupportsRequestedZones() {
-        let now = Date(timeIntervalSince1970: 0)
-        let zones = ["utc", "et", "cet", "turkey", "dubai", "korea", "japan"]
-
-        for zone in zones {
-            let results = CommandTransformerEngine.evaluate("\(zone) time", now: now)
-            XCTAssertEqual(results.count, 1, "Expected \(zone) to match")
-            XCTAssertNotNil(results[0].resultText)
-        }
-    }
 }

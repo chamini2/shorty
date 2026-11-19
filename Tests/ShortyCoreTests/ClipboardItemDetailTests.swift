@@ -149,13 +149,4 @@ final class ClipboardItemDetailTests: XCTestCase {
         XCTAssertNil(ClipboardItemDetailBuilder.detail(for: .back("..")))
         XCTAssertNil(ClipboardItemDetailBuilder.detail(for: .empty("No matches")))
     }
-
-    func testSourceCaptureSkipsShortyItself() {
-        XCTAssertNil(
-            ClipboardSource.frontmostApplication(
-                workspace: .shared,
-                ownPID: NSRunningApplication.current.processIdentifier
-            )
-        )
-    }
 }

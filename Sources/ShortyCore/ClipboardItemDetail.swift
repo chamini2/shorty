@@ -174,17 +174,17 @@ public enum ClipboardItemDetailBuilder {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
               !trimmed.contains(where: { $0.isWhitespace || $0.isNewline }),
-              let schemeEnd = trimmed.range(of: "://")?.lowerBound else {
+              let separator = trimmed.range(of: "://") else {
             return false
         }
 
-        let scheme = trimmed[trimmed.startIndex..<schemeEnd]
+        let scheme = trimmed[trimmed.startIndex..<separator.lowerBound]
         guard let first = scheme.first, first.isLetter else {
             return false
         }
 
         return scheme.allSatisfy { $0.isLetter || $0.isNumber || $0 == "+" || $0 == "-" || $0 == "." }
-            && trimmed.index(after: schemeEnd) < trimmed.endIndex
+            && separator.upperBound < trimmed.endIndex
     }
 
     public static func wordCount(in text: String) -> Int {
