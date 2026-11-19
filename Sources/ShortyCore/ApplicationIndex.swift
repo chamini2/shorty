@@ -26,15 +26,21 @@ public struct InstalledApplication: Equatable, Sendable, Identifiable {
 /// known, the answer is wanted in a few milliseconds while the box is opening,
 /// and a query to the metadata server can take far longer than that.
 public enum ApplicationScanner {
-    /// Where macOS keeps apps people open. `CoreServices` is left out: it
-    /// holds a hundred pieces of system machinery and a couple of real apps,
-    /// and the machinery is only noise in a list you search by name.
+    /// Where macOS keeps apps people open.
+    ///
+    /// The top of `/System/Library/CoreServices` is not among them: a hundred
+    /// agents and helpers for every couple of real apps, and the helpers only
+    /// answer queries meant for something else. The few worth having are
+    /// named in `allowedCoreServicesApps` instead.
     public static var defaultDirectories: [URL] {
         var directories = [
             "/Applications",
             "/Applications/Utilities",
             "/System/Applications",
             "/System/Applications/Utilities",
+            // All real apps, no machinery: About This Mac, Keychain Access,
+            // Archive Utility and the rest.
+            "/System/Library/CoreServices/Applications",
             // Safari and its kin ship in a cryptex. `/Applications/Safari.app`
             // is only a link into here, and a directory listing does not
             // report it.
@@ -48,15 +54,39 @@ public enum ApplicationScanner {
         return directories
     }
 
+    /// Apps taken by name out of the machinery at the top of CoreServices.
+    public static let allowedCoreServicesApps = [
+        "Finder",
+        "Screen Time",
+        "Software Update",
+        "Game Center",
+        "Pass Viewer",
+    ]
+
+    public static var defaultBundlePaths: [String] {
+        allowedCoreServicesApps.map { "/System/Library/CoreServices/\($0).app" }
+    }
+
     /// Every app in the given directories, one level down as well, since
     /// `/Applications` holds folders of apps. Sorted by name, with the first
     /// of a repeated name kept: a system app shadowed by a copy elsewhere
     /// should appear once.
     public static func scan(
         directories: [URL] = defaultDirectories,
+        bundlePaths: [String] = defaultBundlePaths,
         fileManager: FileManager = .default
     ) -> [InstalledApplication] {
         var found: [String: InstalledApplication] = [:]
+
+        for path in bundlePaths {
+            let url = URL(fileURLWithPath: path)
+
+            guard fileManager.fileExists(atPath: path) else {
+                continue
+            }
+
+            add(url, in: url.deletingLastPathComponent(), to: &found)
+        }
 
         for directory in directories {
             for url in contents(of: directory, fileManager: fileManager) {
