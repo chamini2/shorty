@@ -45,6 +45,9 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     /// Only the entry count is shown; the picker does the browsing.
     var history: [ClipboardItem] = []
     var keepAwake = false
+    /// The apps installed on the machine, supplied by the app so the scan is
+    /// shared and kept between openings.
+    var applications: [InstalledApplication] = []
 
     convenience init(box: ShortyBoxController) {
         self.init(box: box, listEntries: nil, title: nil, symbolName: nil)
@@ -275,7 +278,8 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
                 settings: settings,
                 history: history,
                 keepAwake: keepAwake,
-                screenCount: NSScreen.screens.count
+                screenCount: NSScreen.screens.count,
+                applications: applications
             )
         }
 
@@ -425,6 +429,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             )
             list.settings = settings
             list.history = history
+            list.applications = applications
             list.actionHandler = actionHandler
             list.pickerRequestHandler = pickerRequestHandler
             list.viewProvider = viewProvider
@@ -655,6 +660,24 @@ private final class CommandPaletteEntryRowView: NSView {
         static let lineHeight: CGFloat = 18
         static let singleLineHeight: CGFloat = 26
         static let cornerRadius: CGFloat = 6
+        static let iconSize: CGFloat = 16
+        static let iconSpacing: CGFloat = 7
+    }
+
+    /// Icons are read from disk, so each app's is fetched once however many
+    /// times its row is rebuilt while typing.
+    private static var iconCache: [String: NSImage] = [:]
+
+    private static func icon(at path: String) -> NSImage {
+        if let cached = iconCache[path] {
+            return cached
+        }
+
+        let icon = NSWorkspace.shared.icon(forFile: path)
+        icon.size = NSSize(width: Metrics.iconSize, height: Metrics.iconSize)
+        iconCache[path] = icon
+
+        return icon
     }
 
     /// Widest single-line detail in the list, so every row reserves the same
@@ -687,8 +710,30 @@ private final class CommandPaletteEntryRowView: NSView {
         titleField.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleField)
 
+        // An icon shifts the text across; rows without one read as before.
+        var textLeading = leadingAnchor
+        var textInset = Metrics.horizontalPadding
+
+        if let iconPath = entry.iconPath {
+            let iconView = NSImageView()
+            iconView.image = Self.icon(at: iconPath)
+            iconView.imageScaling = .scaleProportionallyUpOrDown
+            iconView.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(iconView)
+
+            NSLayoutConstraint.activate([
+                iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
+                iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+                iconView.widthAnchor.constraint(equalToConstant: Metrics.iconSize),
+                iconView.heightAnchor.constraint(equalToConstant: Metrics.iconSize),
+            ])
+
+            textLeading = iconView.trailingAnchor
+            textInset = Metrics.iconSpacing
+        }
+
         NSLayoutConstraint.activate([
-            titleField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
+            titleField.leadingAnchor.constraint(equalTo: textLeading, constant: textInset),
         ])
 
         guard let detail = entry.detail, !detail.isEmpty else {

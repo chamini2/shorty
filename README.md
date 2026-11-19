@@ -207,6 +207,7 @@ Entries that take you somewhere carry a `›`:
 | --- | --- |
 | `Clipboard History ›` | the picker, with its previews and paste keys |
 | `Time ›` | the current time in each configured zone |
+| `Applications ›` | Every app on the machine, with its icon. Opening one brings it forward when it is already running |
 | `Window ›` | `Maximize`, `Almost Maximize`, `Make Larger`, `Make Smaller`, the halves, the monitor moves when a second display is attached, and `Restore` |
 | `Keep the Mac Awake` | holds off idle and display sleep, like `caffeinate` |
 
