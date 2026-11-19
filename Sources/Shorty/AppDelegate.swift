@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dynamicShortcutItems: [NSMenuItem] = []
     let box = ShortyBoxController()
     private lazy var clipboardPickerPanel = ClipboardPickerPanelController(box: box)
+    private let applicationIndex = ApplicationIndex()
     private var presentedPickerKind: ClipboardMenuKind?
     private var commandPaletteTargetApplication: NSRunningApplication?
     private lazy var commandPalettePanel = CommandPalettePanelController(box: box)
@@ -285,6 +286,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let .moveWindow(command):
             controller.performWindowMove(command)
 
+        case let .openApplication(path):
+            // Through `NSWorkspace`, so an app already running is brought
+            // forward instead of started a second time.
+            NSWorkspace.shared.openApplication(
+                at: URL(fileURLWithPath: path),
+                configuration: NSWorkspace.OpenConfiguration()
+            )
+
         case let .setKeepAwake(active):
             controller.setKeepAwake(active)
             updateKeepAwakeIndicator()
@@ -334,6 +343,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         commandPaletteTargetApplication = Self.currentPasteTargetApplication()
         commandPalettePanel.history = controller.recentClipboardItems()
         commandPalettePanel.keepAwake = controller.isKeepAwakeActive
+        commandPalettePanel.applications = applicationIndex.current()
         commandPalettePanel.show()
     }
 

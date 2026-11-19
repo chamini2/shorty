@@ -8,6 +8,8 @@ public enum CommandAction: Equatable, Sendable {
     case moveWindow(WindowMoveCommand)
     /// Stop the machine sleeping, or let it again.
     case setKeepAwake(Bool)
+    /// Open an app by bundle path, or bring it forward when it is running.
+    case openApplication(path: String)
 }
 
 /// Where an entry leads. A plain list of entries covers most of it; a view is
@@ -35,6 +37,9 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
     /// Where this entry is in the world, for lists that show a map behind
     /// themselves: the time zones do.
     public let marker: WorldMapMarker?
+    /// A file whose icon stands for this entry, such as an app bundle. The
+    /// catalog knows nothing about drawing; it only says where to look.
+    public let iconPath: String?
     /// The row its list opens on. Time marks the local zone: the list is
     /// about elsewhere, but you read it from where you are.
     public let opensSelected: Bool
@@ -47,7 +52,8 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
         destination: CommandDestination? = nil,
         keywords: [String] = [],
         marker: WorldMapMarker? = nil,
-        opensSelected: Bool = false
+        opensSelected: Bool = false,
+        iconPath: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -57,6 +63,7 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
         self.keywords = keywords
         self.marker = marker
         self.opensSelected = opensSelected
+        self.iconPath = iconPath
     }
 
     /// Whether picking this takes you somewhere rather than finishing a job.
@@ -78,7 +85,8 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
             destination: destination,
             keywords: keywords,
             marker: marker,
-            opensSelected: opensSelected
+            opensSelected: opensSelected,
+            iconPath: iconPath
         )
     }
 }
@@ -96,6 +104,7 @@ public enum CommandCatalog {
         snippetGroups: [SnippetGroup] = [],
         keepAwake: Bool = false,
         screenCount: Int = 1,
+        applications: [InstalledApplication] = [],
         transformers: [CommandTransformer] = CommandTransformerEngine.defaultTransformers
     ) -> [CommandEntry] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -106,11 +115,31 @@ public enum CommandCatalog {
             history: history,
             snippetGroups: snippetGroups,
             keepAwake: keepAwake,
-            screenCount: screenCount
+            screenCount: screenCount,
+            applications: applications
         )
 
         return resultEntries(query: normalizedQuery, now: now, transformers: transformers)
-            + matching(actions, query: normalizedQuery)
+            + cappingApplications(matching(actions, query: normalizedQuery))
+    }
+
+    /// A machine holds hundreds of apps and a loose query matches dozens of
+    /// them. Only the best few are kept, so the commands are never buried
+    /// under a list of apps.
+    private static let maximumApplicationMatches = 10
+
+    private static func cappingApplications(_ entries: [CommandEntry]) -> [CommandEntry] {
+        var seen = 0
+
+        return entries.filter { entry in
+            guard entry.id.hasPrefix("app.") else {
+                return true
+            }
+
+            seen += 1
+
+            return seen <= maximumApplicationMatches
+        }
     }
 
     /// The entries a list destination holds, filtered by what was typed.
@@ -152,9 +181,17 @@ public enum CommandCatalog {
         history: [ClipboardItem],
         snippetGroups: [SnippetGroup],
         keepAwake: Bool,
-        screenCount: Int
+        screenCount: Int,
+        applications: [InstalledApplication] = []
     ) -> [CommandEntry] {
         [
+            CommandEntry(
+                id: "applications",
+                title: "Applications",
+                detail: applications.isEmpty ? "None found" : "\(applications.count) installed",
+                destination: .list(applicationEntries(applications)),
+                keywords: ["app", "apps", "open", "launch", "run"]
+            ),
             CommandEntry(
                 id: "clipboard.history",
                 title: "Clipboard History",
@@ -184,6 +221,21 @@ public enum CommandCatalog {
                 keywords: ["layout", "position", "arrange"]
             ),
         ]
+    }
+
+    /// One row per app, labelled with where it was found so two apps of the
+    /// same name can be told apart.
+    private static func applicationEntries(_ applications: [InstalledApplication]) -> [CommandEntry] {
+        applications.map { application in
+            CommandEntry(
+                id: application.id,
+                title: application.name,
+                detail: application.directoryName,
+                action: .openApplication(path: application.path),
+                keywords: [application.directoryName],
+                iconPath: application.path
+            )
+        }
     }
 
     /// Maximize first, as the one most often wanted, then the halves, then
