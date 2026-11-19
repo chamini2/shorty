@@ -28,6 +28,8 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     /// Behind the rows, for lists whose entries are places: the time zones.
     private let mapView = WorldMapView(frame: .zero)
     private var entries: [CommandEntry] = []
+    private let icons = AppIconLoader()
+    private var iconRefreshScheduled = false
     private var rowHeights: [CGFloat] = []
     private var selectedIndex = 0
     /// Set when this list shows a destination's entries rather than the root.
@@ -64,6 +66,10 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         self.listTitle = title
         self.listSymbolName = symbolName
         super.init()
+
+        icons.didLoad = { [weak self] in
+            self?.scheduleIconRefresh()
+        }
 
         configureContent()
         configureSearchField()
@@ -322,6 +328,25 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         )
     }
 
+    /// Icons arrive after the rows are already on screen. Redrawing is
+    /// coalesced, so two hundred arrivals cost one pass, not two hundred.
+    private func scheduleIconRefresh() {
+        guard !iconRefreshScheduled else {
+            return
+        }
+
+        iconRefreshScheduled = true
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                return
+            }
+
+            iconRefreshScheduled = false
+            renderRows()
+        }
+    }
+
     private func renderRows() {
         updateMap()
 
@@ -331,12 +356,14 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         }
 
         let detailColumnWidth = CommandPaletteEntryRowView.detailColumnWidth(for: entries)
+        icons.prepare(entries.compactMap(\.iconPath))
 
         for (index, pair) in zip(entries, rowHeights).enumerated() {
             let row = CommandPaletteEntryRowView(
                 entry: pair.0,
                 isSelected: index == selectedIndex,
-                detailColumnWidth: detailColumnWidth
+                detailColumnWidth: detailColumnWidth,
+                icon: pair.0.iconPath.flatMap { icons.icon(at: $0) }
             )
             row.translatesAutoresizingMaskIntoConstraints = false
             stackView.addArrangedSubview(row)
@@ -664,21 +691,7 @@ private final class CommandPaletteEntryRowView: NSView {
         static let iconSpacing: CGFloat = 7
     }
 
-    /// Icons are read from disk, so each app's is fetched once however many
-    /// times its row is rebuilt while typing.
-    private static var iconCache: [String: NSImage] = [:]
 
-    private static func icon(at path: String) -> NSImage {
-        if let cached = iconCache[path] {
-            return cached
-        }
-
-        let icon = NSWorkspace.shared.icon(forFile: path)
-        icon.size = NSSize(width: Metrics.iconSize, height: Metrics.iconSize)
-        iconCache[path] = icon
-
-        return icon
-    }
 
     /// Widest single-line detail in the list, so every row reserves the same
     /// column and the parts that vary, such as a UTC offset, line up.
@@ -694,7 +707,7 @@ private final class CommandPaletteEntryRowView: NSView {
         return widths.max() ?? 0
     }
 
-    init(entry: CommandEntry, isSelected: Bool, detailColumnWidth: CGFloat = 0) {
+    init(entry: CommandEntry, isSelected: Bool, detailColumnWidth: CGFloat = 0, icon: NSImage? = nil) {
         super.init(frame: .zero)
 
         wantsLayer = true
@@ -714,9 +727,9 @@ private final class CommandPaletteEntryRowView: NSView {
         var textLeading = leadingAnchor
         var textInset = Metrics.horizontalPadding
 
-        if let iconPath = entry.iconPath {
+        if entry.iconPath != nil {
             let iconView = NSImageView()
-            iconView.image = Self.icon(at: iconPath)
+            iconView.image = icon
             iconView.imageScaling = .scaleProportionallyUpOrDown
             iconView.translatesAutoresizingMaskIntoConstraints = false
             addSubview(iconView)
