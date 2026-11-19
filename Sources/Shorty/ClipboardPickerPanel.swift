@@ -23,13 +23,6 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         static let topOffsetRatio: CGFloat = 0.20
         static let bottomMargin: CGFloat = 20
         static let iconSize: CGFloat = 16
-        static let iconLeading: CGFloat = 0
-        static let textSpacing: CGFloat = 4
-        static let trailingPadding: CGFloat = 30
-        static let headerLeading: CGFloat = 0
-        static let disclosureSize: CGFloat = 12
-        static let disclosureTrailing: CGFloat = 24
-        static let disclosureSpacing: CGFloat = 8
     }
 
     private struct HandledKeyEvent {
@@ -929,7 +922,7 @@ private final class ClipboardPickerCellView: NSTableCellView {
         static let iconLeading: CGFloat = 0
         static let textSpacing: CGFloat = 4
         static let trailingPadding: CGFloat = 30
-        static let headerLeading: CGFloat = -8
+        static let headerLeading: CGFloat = 0
         static let disclosureSize: CGFloat = 12
         static let disclosureTrailing: CGFloat = 24
         static let disclosureSpacing: CGFloat = 8
