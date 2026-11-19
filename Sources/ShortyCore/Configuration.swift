@@ -141,8 +141,10 @@ public struct ConfigurationFile: Decodable {
     }
 }
 
+/// A titled group is a folder in the picker; a group without a title holds a
+/// snippet listed directly at the top level.
 public struct SnippetGroup: Equatable, Sendable {
-    public let title: String
+    public let title: String?
     public let snippets: [Snippet]
 }
 
@@ -512,31 +514,35 @@ public enum ConfigurationLoader {
         }
 
         guard let snippetsMapping = snippetsNode.mapping else {
-            throw ConfigurationError.invalidSnippets("`snippets` must be a mapping of groups.")
+            throw ConfigurationError.invalidSnippets("`snippets` must be a mapping of snippets and groups.")
         }
 
-        return try snippetsMapping.map { groupPair in
-            guard let groupTitle = groupPair.key.string, !groupTitle.isEmpty else {
-                throw ConfigurationError.invalidSnippets("Snippet group names must be strings.")
+        return try snippetsMapping.map { pair in
+            guard let key = pair.key.string, !key.isEmpty else {
+                throw ConfigurationError.invalidSnippets("Snippet and group names must be strings.")
             }
 
-            guard let groupMapping = groupPair.value.mapping else {
-                throw ConfigurationError.invalidSnippets("Snippet group `\(groupTitle)` must contain key-value snippets.")
+            if let content = pair.value.string {
+                return SnippetGroup(title: nil, snippets: [Snippet(title: key, content: content)])
+            }
+
+            guard let groupMapping = pair.value.mapping else {
+                throw ConfigurationError.invalidSnippets("`\(key)` must be a string snippet or a group of key-value snippets.")
             }
 
             let snippets = try groupMapping.map { snippetPair in
                 guard let title = snippetPair.key.string, !title.isEmpty else {
-                    throw ConfigurationError.invalidSnippets("Snippet names in group `\(groupTitle)` must be strings.")
+                    throw ConfigurationError.invalidSnippets("Snippet names in group `\(key)` must be strings.")
                 }
 
                 guard let content = snippetPair.value.string else {
-                    throw ConfigurationError.invalidSnippets("Snippet `\(title)` in group `\(groupTitle)` must be a string.")
+                    throw ConfigurationError.invalidSnippets("Snippet `\(title)` in group `\(key)` must be a string.")
                 }
 
                 return Snippet(title: title, content: content)
             }
 
-            return SnippetGroup(title: groupTitle, snippets: snippets)
+            return SnippetGroup(title: key, snippets: snippets)
         }
     }
 

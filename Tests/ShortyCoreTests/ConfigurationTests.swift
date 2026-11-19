@@ -96,6 +96,32 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertEqual(configuration.snippetGroups.first?.snippets.first?.title, "Greeting")
     }
 
+    func testListsTopLevelSnippetsBesideGroupsInConfigOrder() throws {
+        let url = try temporaryConfigURL(
+            extension: "yaml",
+            contents: """
+            snippets:
+              Email: me@example.com
+              Work:
+                Greeting: Hello there
+              Signature: Cheers
+            """
+        )
+
+        let configuration = try ConfigurationLoader.load(from: url)
+        let entries = ClipboardPickerSearch.rootEntries(
+            history: [],
+            snippetGroups: configuration.snippetGroups,
+            query: "",
+            mode: .snippetsOnly
+        )
+
+        XCTAssertEqual(entries.map(\.title), ["Snippets", "Email", "Work", "Signature"])
+        XCTAssertEqual(entries[1].pasteResult, .snippet(groupTitle: nil, snippet: Snippet(title: "Email", content: "me@example.com")))
+        XCTAssertNotNil(entries[2].folder)
+        XCTAssertEqual(entries[3].pasteResult, .snippet(groupTitle: nil, snippet: Snippet(title: "Signature", content: "Cheers")))
+    }
+
     func testRejectsArrayConfiguration() throws {
         let url = try temporaryConfigURL(
             extension: "yaml",

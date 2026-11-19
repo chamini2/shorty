@@ -38,7 +38,7 @@ public indirect enum ClipboardPickerEntry: Equatable, Identifiable, Sendable {
     case header(String)
     case folder(ClipboardPickerFolder)
     case history(ClipboardItem)
-    case snippet(groupTitle: String, snippet: Snippet)
+    case snippet(groupTitle: String?, snippet: Snippet)
     case back(String)
     case empty(String)
 
@@ -51,7 +51,7 @@ public indirect enum ClipboardPickerEntry: Equatable, Identifiable, Sendable {
         case let .history(item):
             return "history:\(item.id)"
         case let .snippet(groupTitle, snippet):
-            return "snippet:\(groupTitle):\(snippet.title):\(snippet.content)"
+            return "snippet:\(groupTitle ?? ""):\(snippet.title):\(snippet.content)"
         case let .back(title):
             return "back:\(title)"
         case let .empty(title):
@@ -112,14 +112,14 @@ public indirect enum ClipboardPickerEntry: Equatable, Identifiable, Sendable {
 
 public enum ClipboardPickerResult: Equatable, Identifiable, Sendable {
     case history(ClipboardItem)
-    case snippet(groupTitle: String, snippet: Snippet)
+    case snippet(groupTitle: String?, snippet: Snippet)
 
     public var id: String {
         switch self {
         case let .history(item):
             return "history:\(item.id)"
         case let .snippet(groupTitle, snippet):
-            return "snippet:\(groupTitle):\(snippet.title):\(snippet.content)"
+            return "snippet:\(groupTitle ?? ""):\(snippet.title):\(snippet.content)"
         }
     }
 }
@@ -193,7 +193,7 @@ public enum ClipboardPickerSearch {
 
         let snippetResults = snippetGroups.flatMap { group in
             group.snippets.compactMap { snippet -> ClipboardPickerResult? in
-                guard matches(normalizedQuery, in: [group.title, snippet.title, snippet.content]) else {
+                guard matches(normalizedQuery, in: [group.title, snippet.title, snippet.content].compactMap { $0 }) else {
                     return nil
                 }
 
@@ -211,19 +211,25 @@ public enum ClipboardPickerSearch {
     }
 
     private static func rootSnippetEntries(_ snippetGroups: [SnippetGroup]) -> [ClipboardPickerEntry] {
-        snippetGroups.compactMap { group in
-            guard !group.snippets.isEmpty else {
-                return nil
+        snippetGroups.flatMap { group -> [ClipboardPickerEntry] in
+            guard let title = group.title else {
+                return group.snippets.map { .snippet(groupTitle: nil, snippet: $0) }
             }
 
-            return .folder(
-                ClipboardPickerFolder(
-                    id: "snippets:\(group.title)",
-                    title: group.title,
-                    kind: .snippets,
-                    entries: group.snippets.map { .snippet(groupTitle: group.title, snippet: $0) }
-                )
-            )
+            guard !group.snippets.isEmpty else {
+                return []
+            }
+
+            return [
+                .folder(
+                    ClipboardPickerFolder(
+                        id: "snippets:\(title)",
+                        title: title,
+                        kind: .snippets,
+                        entries: group.snippets.map { .snippet(groupTitle: title, snippet: $0) }
+                    )
+                ),
+            ]
         }
     }
 
@@ -273,7 +279,7 @@ public enum ClipboardPickerSearch {
         case let .history(item):
             return matches(query, in: item.searchableText)
         case let .snippet(groupTitle, snippet):
-            return matches(query, in: [groupTitle, snippet.title, snippet.content])
+            return matches(query, in: [groupTitle, snippet.title, snippet.content].compactMap { $0 })
         }
     }
 

@@ -130,17 +130,21 @@ The picker is a floating panel with a search box. Choosing an item pastes it int
 
 ### Snippets
 
-Snippets live in the YAML config, grouped one level deep:
+Snippets live in the YAML config. A key with a text value is a snippet; a key
+with a mapping is a group of snippets (one level deep):
 
 ```yaml
 snippets:
+  Email: me@example.com
   Work:
     Greeting: Hello from Shorty.
   Personal:
     Address: 123 Example St
 ```
 
-Each group is a folder in the picker, each key is an item title, and the value is pasted as plain text. Order follows the config.
+Top-level snippets are listed directly in the picker, each group is a folder,
+each key is an item title, and the value is pasted as plain text. Order follows
+the config.
 
 Snippets sit above the clipboard history in the picker. The picker opens on the
 newest history entry, so snippets are one `up` away and never in the way.

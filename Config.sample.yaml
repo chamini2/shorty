@@ -50,6 +50,7 @@ shortcuts:
     executable-path-prefix: /Users/example/Apps/PortableCode/Visual Studio Code.app/
 
 snippets:
+  Email: me@example.com
   Work:
     Greeting: Hello from Shorty.
     Rich Example: Plain fallback text

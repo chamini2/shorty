@@ -59,11 +59,11 @@ public enum ClipboardItemDetailBuilder {
             return detail(for: item, dateFormatter: dateFormatter)
 
         case let .snippet(groupTitle, snippet):
+            let groupRows = groupTitle.map { [ClipboardDetailRow(label: "Group", value: $0)] } ?? []
             return ClipboardItemDetail(
                 body: snippet.content,
                 kind: .snippet,
-                rows: [
-                    ClipboardDetailRow(label: "Group", value: groupTitle),
+                rows: groupRows + [
                     ClipboardDetailRow(label: "Type", value: ClipboardItemKind.snippet.rawValue),
                 ] + sizeRows(for: snippet.content)
             )
