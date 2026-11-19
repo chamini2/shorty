@@ -29,7 +29,7 @@ final class ApplicationIndexTests: XCTestCase {
         try makeBundle("Apps/Utilities/Terminal.app")
         try makeBundle("Apps/NotAnApp.txt")
 
-        let found = ApplicationScanner.scan(directories: [root.appendingPathComponent("Apps")])
+        let found = ApplicationScanner.scan(directories: [root.appendingPathComponent("Apps")], bundlePaths: [])
 
         XCTAssertEqual(found.map(\.name), ["Safari", "Terminal"])
         XCTAssertEqual(found.first { $0.name == "Terminal" }?.directoryName, "Utilities")
@@ -40,19 +40,42 @@ final class ApplicationIndexTests: XCTestCase {
         try makeBundle("Apps/Xcode.app")
         try makeBundle("Apps/Xcode.app/Contents/Applications/Instruments.app")
 
-        let found = ApplicationScanner.scan(directories: [root.appendingPathComponent("Apps")])
+        let found = ApplicationScanner.scan(directories: [root.appendingPathComponent("Apps")], bundlePaths: [])
 
         XCTAssertEqual(found.map(\.name), ["Xcode"])
+    }
+
+    func testNamedBundlesAreTakenEvenWhereTheDirectoryIsNotScanned() throws {
+        // Finder and its few neighbours are allowed by name out of the
+        // machinery at the top of CoreServices.
+        try makeBundle("CoreServices/Finder.app")
+        try makeBundle("CoreServices/ControlStrip.app")
+
+        let found = ApplicationScanner.scan(
+            directories: [],
+            bundlePaths: [root.appendingPathComponent("CoreServices/Finder.app").path]
+        )
+
+        XCTAssertEqual(found.map(\.name), ["Finder"])
+    }
+
+    func testAMissingNamedBundleIsSkipped() {
+        XCTAssertTrue(
+            ApplicationScanner.scan(directories: [], bundlePaths: ["/nowhere/Nothing.app"]).isEmpty
+        )
     }
 
     func testTheFirstOfARepeatedNameWins() throws {
         try makeBundle("First/Mail.app")
         try makeBundle("Second/Mail.app")
 
-        let found = ApplicationScanner.scan(directories: [
-            root.appendingPathComponent("First"),
-            root.appendingPathComponent("Second"),
-        ])
+        let found = ApplicationScanner.scan(
+            directories: [
+                root.appendingPathComponent("First"),
+                root.appendingPathComponent("Second"),
+            ],
+            bundlePaths: []
+        )
 
         XCTAssertEqual(found.count, 1)
         XCTAssertEqual(found.first?.directoryName, "First")
