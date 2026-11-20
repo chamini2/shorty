@@ -1,5 +1,8 @@
 import AppKit
 import Carbon
+// The tap callback is handed a `CGEvent`, which Core Graphics does not mark
+// `Sendable`. It is delivered on the main run loop and read there only.
+@preconcurrency import CoreGraphics
 
 /// Anything the box can show: the command list, a list of times, the clipboard
 /// picker. Each supplies a view and handles its own keys; the box handles the
@@ -42,6 +45,9 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
     private let panel: ShortyBoxPanel
     private let container = NSView()
     private var stack: [ShortyBoxContent] = []
+    /// Live while the box is open; see `startKeyboardCapture`.
+    private var keyboardTap: CFMachPort?
+    private var keyboardTapSource: CFRunLoopSource?
 
     override init() {
         panel = ShortyBoxPanel(
@@ -103,6 +109,7 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
     }
 
     func close() {
+        stopKeyboardCapture()
         stack.forEach { $0.boxDidDismiss() }
         stack = []
         panel.orderOut(nil)
@@ -144,12 +151,109 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
 
         if !wasVisible {
             positionPanel()
-            NSApp.activate(ignoringOtherApps: true)
-            panel.orderFrontRegardless()
-            panel.makeKeyAndOrderFront(nil)
+            takeFocus()
         }
 
         content.boxDidPresent(in: panel)
+    }
+
+    /// Brings the box forward and makes sure the keys come with it.
+    private func takeFocus() {
+        // The keys are read from the stream whatever activation does, since
+        // an overlay can hold the keyboard without ever activating and no
+        // check of who is frontmost can see it happen.
+        startKeyboardCapture()
+
+        NSApp.activate(ignoringOtherApps: true)
+        panel.orderFrontRegardless()
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    /// Takes the keyboard from the event stream while the box is open.
+    ///
+    /// Activation is not enough on its own. An overlay terminal, such as
+    /// Tern, holds the keyboard without ever activating: the box becomes
+    /// frontmost, draws its caret, and every keystroke still goes to the
+    /// overlay. `isKeyWindow` reports the key window inside this process and
+    /// says nothing about it, so there is no state to check and no moment at
+    /// which checking would help.
+    ///
+    /// Reading the keys from the stream is what works. They are consumed, so
+    /// nothing behind the box acts on them too, and the tap goes away the
+    /// moment the box closes.
+    private func startKeyboardCapture() {
+        guard keyboardTap == nil else {
+            return
+        }
+
+        let events = CGEventMask(1 << CGEventType.keyDown.rawValue)
+            | CGEventMask(1 << CGEventType.flagsChanged.rawValue)
+
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: events,
+            callback: { _, _, event, pointer in
+                guard let pointer else {
+                    return Unmanaged.passUnretained(event)
+                }
+
+                let controller = Unmanaged<ShortyBoxController>.fromOpaque(pointer).takeUnretainedValue()
+
+                return MainActor.assumeIsolated {
+                    controller.handleCaptured(event)
+                }
+            },
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            console.error("could not read the keyboard: Shorty needs Accessibility permission")
+            return
+        }
+
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+
+        keyboardTap = tap
+        keyboardTapSource = source
+    }
+
+    private func stopKeyboardCapture() {
+        guard let keyboardTap else {
+            return
+        }
+
+        CGEvent.tapEnable(tap: keyboardTap, enable: false)
+
+        if let keyboardTapSource {
+            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), keyboardTapSource, .commonModes)
+        }
+
+        CFMachPortInvalidate(keyboardTap)
+        self.keyboardTap = nil
+        keyboardTapSource = nil
+    }
+
+    /// Hands a captured key to the box, and swallows it so the app behind
+    /// does not act on it too.
+    private func handleCaptured(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+        guard panel.isVisible, let keyEvent = NSEvent(cgEvent: event) else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        // Modifier changes are state, not input: the field needs to know
+        // about them but nothing else should be denied them.
+        guard keyEvent.type == .keyDown else {
+            panel.firstResponder?.flagsChanged(with: keyEvent)
+            return Unmanaged.passUnretained(event)
+        }
+
+        if panel.keyEventHandler?(keyEvent) != true {
+            panel.firstResponder?.keyDown(with: keyEvent)
+        }
+
+        return nil
     }
 
     private func configurePanel() {
