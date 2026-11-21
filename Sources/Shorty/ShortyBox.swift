@@ -48,6 +48,9 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
     /// Live while the box is open; see `startKeyboardCapture`.
     private var keyboardTap: CFMachPort?
     private var keyboardTapSource: CFRunLoopSource?
+    /// Set while a captured key is being handed to the panel, so the box's
+    /// key handler does not see the same keystroke twice.
+    private var isDeliveringCapturedKey = false
 
     override init() {
         panel = ShortyBoxPanel(
@@ -219,6 +222,38 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         keyboardTapSource = source
     }
 
+    /// Hands a captured key to the window rather than straight to the first
+    /// responder.
+    ///
+    /// Calling `keyDown` on the responder delivers the keystroke but none of
+    /// what AppKit wraps around it: an event off the stream carries no window,
+    /// and without one a field editor never turns the key into an editing
+    /// command. `cmd+delete` and the arrows did nothing for exactly that
+    /// reason. Rebuilt against the panel, the key goes through the ordinary
+    /// path and behaves as it would in any other window.
+    private func deliver(_ event: NSEvent) {
+        guard let windowEvent = NSEvent.keyEvent(
+            with: event.type,
+            location: event.locationInWindow,
+            modifierFlags: event.modifierFlags,
+            timestamp: event.timestamp,
+            windowNumber: panel.windowNumber,
+            context: nil,
+            characters: event.characters ?? "",
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers ?? "",
+            isARepeat: event.isARepeat,
+            keyCode: event.keyCode
+        ) else {
+            return
+        }
+
+        // The panel asks its handler first; this key has been through that
+        // already, so the second pass is skipped.
+        isDeliveringCapturedKey = true
+        panel.sendEvent(windowEvent)
+        isDeliveringCapturedKey = false
+    }
+
     private func stopKeyboardCapture() {
         guard let keyboardTap else {
             return
@@ -250,7 +285,7 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         }
 
         if panel.keyEventHandler?(keyEvent) != true {
-            panel.firstResponder?.keyDown(with: keyEvent)
+            deliver(keyEvent)
         }
 
         return nil
@@ -269,7 +304,7 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         // Escape is the box's: handling it in each content let one keystroke
         // pop twice, which closed the window instead of going back a level.
         panel.keyEventHandler = { [weak self] event in
-            guard let self else {
+            guard let self, !isDeliveringCapturedKey else {
                 return false
             }
 
