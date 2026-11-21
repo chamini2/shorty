@@ -344,6 +344,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         commandPalettePanel.history = controller.recentClipboardItems()
         commandPalettePanel.keepAwake = controller.isKeepAwakeActive
         commandPalettePanel.applications = applicationIndex.current()
+        box.boundHotKeys = controller.boundHotKeys
         commandPalettePanel.show()
     }
 
@@ -487,6 +488,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showClipboardPicker(_ kind: ClipboardMenuKind) {
         prepareClipboardPicker(kind)
+        box.boundHotKeys = controller.boundHotKeys
         box.open(clipboardPickerPanel)
     }
 

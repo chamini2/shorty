@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import ShortyCore
 // The tap callback is handed a `CGEvent`, which Core Graphics does not mark
 // `Sendable`. It is delivered on the main run loop and read there only.
 @preconcurrency import CoreGraphics
@@ -51,6 +52,8 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
     /// Set while a captured key is being handed to the panel, so the box's
     /// key handler does not see the same keystroke twice.
     private var isDeliveringCapturedKey = false
+    /// Hotkeys that must reach macOS even while the box has the keyboard.
+    var boundHotKeys: [KeyCombo] = []
 
     override init() {
         panel = ShortyBoxPanel(
@@ -281,6 +284,15 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         // about them but nothing else should be denied them.
         guard keyEvent.type == .keyDown else {
             panel.firstResponder?.flagsChanged(with: keyEvent)
+            return Unmanaged.passUnretained(event)
+        }
+
+        // A hotkey keeps working while the box is open: the same key that
+        // opened it closes it again, and swallowing it here would be the box
+        // holding itself open.
+        if boundHotKeys.contains(where: {
+            $0.matches(keyCode: keyEvent.keyCode, flags: event.flags)
+        }) {
             return Unmanaged.passUnretained(event)
         }
 

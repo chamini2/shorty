@@ -54,6 +54,17 @@ public struct KeyCombo: Hashable, Sendable {
         return flags
     }
 
+    /// Whether a keystroke read from the event stream is this hotkey.
+    public func matches(keyCode: UInt16, flags: CGEventFlags) -> Bool {
+        guard UInt32(keyCode) == self.keyCode else {
+            return false
+        }
+
+        let interesting: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl, .maskShift]
+
+        return flags.intersection(interesting) == cgEventFlags
+    }
+
     public static func parse(_ rawValue: String) throws -> KeyCombo {
         let tokens = rawValue
             .split(separator: "+")
