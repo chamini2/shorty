@@ -29,6 +29,7 @@ public indirect enum CommandDestination: Equatable, Sendable {
 
 public enum CommandSearchKind: Equatable, Sendable {
     case files
+    case timeZones
 }
 
 public enum CommandViewKind: Equatable, Sendable {
@@ -64,6 +65,9 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
     /// An SF Symbol standing for the entry, for rows with no file to take an
     /// icon from.
     public let symbolName: String?
+    /// Shown at the end of the title line of a detailed row, where a value
+    /// belongs beside the name it answers for.
+    public let trailing: String?
     public let layout: CommandEntryLayout
     /// The row its list opens on. Time marks the local zone: the list is
     /// about elsewhere, but you read it from where you are.
@@ -79,6 +83,7 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
         marker: WorldMapMarker? = nil,
         opensSelected: Bool = false,
         iconPath: String? = nil,
+        trailing: String? = nil,
         symbolName: String? = nil,
         layout: CommandEntryLayout = .compact
     ) {
@@ -92,7 +97,13 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
         self.opensSelected = opensSelected
         self.iconPath = iconPath
         self.symbolName = symbolName
+        self.trailing = trailing
         self.layout = layout
+    }
+
+    /// The zone a time row stands for, which it carries as a keyword.
+    public var timeZoneIdentifier: String? {
+        keywords.first { TimeZone.knownTimeZoneIdentifiers.contains($0) }
     }
 
     /// Whether picking this takes you somewhere rather than finishing a job.
@@ -116,6 +127,7 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
             marker: marker,
             opensSelected: opensSelected,
             iconPath: iconPath,
+            trailing: trailing,
             symbolName: symbolName,
             layout: layout
         )
@@ -262,7 +274,7 @@ public enum CommandCatalog {
                 id: "time",
                 title: "Time",
                 detail: "Current time around the world",
-                destination: .list(timeEntries(now: now, localTimeZone: localTimeZone, settings: settings)),
+                destination: .search(.timeZones),
                 keywords: ["clock", "timezone", "zone"]
             ),
             CommandEntry(
@@ -384,6 +396,85 @@ public enum CommandCatalog {
     }
 
     /// Local and UTC always; anything else comes from the config.
+    /// The zone rows for what was typed inside Time.
+    ///
+    /// Empty, it is the list you configured. Typing searches every zone on
+    /// earth and ranks the two together, so a city you keep on the list wins
+    /// over the same city found by search, and anywhere else is a word away.
+    public static func timeZoneEntries(
+        query: String,
+        now: Date = Date(),
+        localTimeZone: TimeZone = .current,
+        settings: CommandBoxSettings = .default
+    ) -> [CommandEntry] {
+        let configured = timeEntries(now: now, localTimeZone: localTimeZone, settings: settings)
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmed.isEmpty else {
+            return configured
+        }
+
+        let known = Set(configured.compactMap(\.timeZoneIdentifier))
+        let found = TimeZoneDirectory.search(trimmed)
+            .filter { !known.contains($0.timeZone.identifier) }
+            .map { foundZoneEntry($0, now: now) }
+
+        return rankedByMatch(matching(configured, query: trimmed) + found, query: trimmed)
+    }
+
+    /// Found zones say where they are, since a city alone leaves `Cordoba` in
+    /// Spain and `Cordoba` in Argentina looking identical.
+    private static func foundZoneEntry(_ match: TimeZoneMatch, now: Date) -> CommandEntry {
+        let text = CommandTransformerEngine.currentTime(in: match.timeZone, now: now)
+        let place = placeLabel(for: match.timeZone, now: now, titled: match.city)
+
+        return CommandEntry(
+            id: "time.found.\(match.timeZone.identifier)",
+            title: match.city,
+            detail: place,
+            action: .copyText(text),
+            keywords: [match.timeZone.identifier, match.country].compactMap { $0 },
+            marker: TimeZoneLocations.marker(for: match.timeZone, at: now),
+            trailing: CommandTransformerEngine.wallClock(now, in: match.timeZone),
+            layout: .detailed
+        )
+    }
+
+    /// Where a zone is and how far from UTC, which is what tells two rows
+    /// with similar names apart. A configured row is labelled whatever its
+    /// owner called it, so the city is named here when it differs.
+    /// Everything a zone can be found by: its identifier, its city and its
+    /// country.
+    private static func searchTerms(for timeZone: TimeZone) -> [String] {
+        [
+            timeZone.identifier,
+            timeZone.identifier.replacingOccurrences(of: "_", with: " "),
+            TimeZoneResolver.cityLabel(for: timeZone),
+            TimeZoneDirectory.countryName(for: timeZone.identifier),
+        ].compactMap { $0 }
+    }
+
+    private static func placeLabel(for timeZone: TimeZone, now: Date, titled title: String) -> String {
+        let offset = CommandTransformerEngine.utcOffsetLabel(of: timeZone, at: now)
+        let city = TimeZoneResolver.cityLabel(for: timeZone)
+        let country = TimeZoneDirectory.countryName(for: timeZone.identifier)
+        // The city is named only when the row is not already called that:
+        // `San Francisco` is a label for the Los Angeles zone, while a found
+        // `Rome` would only repeat itself.
+        let place = (city == title || city == country) ? nil : city
+
+        return [place, country, offset].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private static func rankedByMatch(_ entries: [CommandEntry], query: String) -> [CommandEntry] {
+        entries
+            .map { entry in
+                (entry, FuzzyMatcher.bestScore(query, in: [entry.title] + entry.keywords) ?? 0)
+            }
+            .sorted { $0.1 > $1.1 }
+            .map(\.0)
+    }
+
     private static func timeEntries(
         now: Date,
         localTimeZone: TimeZone,
@@ -402,18 +493,24 @@ public enum CommandCatalog {
             ]
             : settings.timeZones
 
-        // Shown in the order the config lists them.
+        // Shown in the order the config lists them, and in the same shape as
+        // a zone the search finds: one list, one kind of row.
         return zones.map { zone in
             let text = CommandTransformerEngine.currentTime(in: zone.timeZone, now: now)
 
             return CommandEntry(
                 id: "time.\(zone.label)",
                 title: zone.label,
-                detail: text,
+                detail: placeLabel(for: zone.timeZone, now: now, titled: zone.label),
                 action: .copyText(text),
-                keywords: [zone.timeZone.identifier],
+                // Findable by where it is, not only by what it was called:
+                // a row labelled `Turkey` is still Istanbul in Türkiye, and
+                // `San Francisco` is still the Los Angeles zone.
+                keywords: searchTerms(for: zone.timeZone),
                 marker: TimeZoneLocations.marker(for: zone.timeZone, at: now),
-                opensSelected: zone.timeZone.identifier == localTimeZone.identifier
+                opensSelected: zone.timeZone.identifier == localTimeZone.identifier,
+                trailing: CommandTransformerEngine.wallClock(now, in: zone.timeZone),
+                layout: .detailed
             )
         }
     }

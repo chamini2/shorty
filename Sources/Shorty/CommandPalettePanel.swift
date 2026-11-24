@@ -199,7 +199,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         stackView.translatesAutoresizingMaskIntoConstraints = false
         listContainer.translatesAutoresizingMaskIntoConstraints = false
         mapView.translatesAutoresizingMaskIntoConstraints = false
-        mapView.isHidden = !showsMap
+        mapView.isHidden = true
 
         // The panel no longer grows with its rows, so the list scrolls.
         scrollView.documentView = listContainer
@@ -281,9 +281,17 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     private func updateResults(resetSelection: Bool = true) {
         let query = searchField.stringValue
 
-        if search == .files {
+        switch search {
+        case .files:
             searchFiles(query: query)
             return
+        case .timeZones:
+            // Local work, so the answer is ready in the same breath as the
+            // keystroke and there is nothing to wait for.
+            show(entries: CommandCatalog.timeZoneEntries(query: query, settings: settings))
+            return
+        case nil:
+            break
         }
 
         if let listEntries {
@@ -338,7 +346,8 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
 
     private func show(entries newEntries: [CommandEntry]) {
         entries = newEntries
-        selectedIndex = entries.first?.action == nil && entries.first?.destination == nil ? -1 : 0
+        selectedIndex = entries.firstIndex(where: \.opensSelected)
+            ?? (entries.first?.action == nil && entries.first?.destination == nil ? -1 : 0)
         rowHeights = entries.map {
             CommandPaletteEntryRowView.height(for: $0, width: Metrics.panelWidth - Metrics.horizontalPadding * 2)
         }
@@ -359,11 +368,15 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
 
     /// Only a list made of places gets the map: the root, with its mix of
     /// commands, does not.
+    /// Read from the rows on screen rather than from a fixed list: the zones
+    /// are searched now, so there is no list to ask until something is shown.
     private var showsMap: Bool {
-        listEntries?.contains { $0.marker != nil } ?? false
+        entries.contains { $0.marker != nil }
     }
 
     private func updateMap() {
+        mapView.isHidden = !showsMap
+
         guard showsMap else {
             return
         }
@@ -785,6 +798,9 @@ private final class CommandPaletteEntryRowView: NSView {
         static let detailedHeight: CGFloat = 46
         static let detailedTitleSpacing: CGFloat = 2
         static let detailedPathFontSize: CGFloat = 11
+        /// Room for the scroller, which floats over the rows rather than
+        /// taking space of its own: without it the clock loses its seconds.
+        static let scrollerAllowance: CGFloat = 12
     }
 
 
@@ -908,12 +924,30 @@ private final class CommandPaletteEntryRowView: NSView {
     /// Half a search for `README` comes back with the same name every time,
     /// so the path is the part that decides.
     private func configureDetailed(entry: CommandEntry, isSelected: Bool, icon: NSImage?) {
-        let iconView = NSImageView()
-        iconView.image = icon ?? entry.symbolName.flatMap(Self.symbol)
-        iconView.contentTintColor = icon == nil ? .secondaryLabelColor : nil
-        iconView.imageScaling = .scaleProportionallyUpOrDown
-        iconView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(iconView)
+        // A row with no picture of its own gives the space back to the text
+        // rather than leaving a hole where an icon would be.
+        let picture = icon ?? entry.symbolName.flatMap(Self.symbol)
+        var textLeading = leadingAnchor
+        var textInset = Metrics.horizontalPadding
+
+        if let picture {
+            let iconView = NSImageView()
+            iconView.image = picture
+            iconView.contentTintColor = icon == nil ? .secondaryLabelColor : nil
+            iconView.imageScaling = .scaleProportionallyUpOrDown
+            iconView.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(iconView)
+
+            NSLayoutConstraint.activate([
+                iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
+                iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+                iconView.widthAnchor.constraint(equalToConstant: Metrics.detailedIconSize),
+                iconView.heightAnchor.constraint(equalToConstant: Metrics.detailedIconSize),
+            ])
+
+            textLeading = iconView.trailingAnchor
+            textInset = Metrics.iconSpacing
+        }
 
         let titleField = NSTextField(labelWithString: entry.title)
         titleField.font = .systemFont(ofSize: Metrics.titleFontSize, weight: .medium)
@@ -921,6 +955,28 @@ private final class CommandPaletteEntryRowView: NSView {
         titleField.lineBreakMode = .byTruncatingTail
         titleField.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleField)
+
+        if let trailing = entry.trailing {
+            let valueField = NSTextField(labelWithString: trailing)
+            valueField.font = Self.detailFont
+            valueField.textColor = .secondaryLabelColor
+            valueField.lineBreakMode = .byTruncatingTail
+            valueField.translatesAutoresizingMaskIntoConstraints = false
+            valueField.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+            addSubview(valueField)
+
+            NSLayoutConstraint.activate([
+                valueField.trailingAnchor.constraint(
+                    equalTo: trailingAnchor,
+                    constant: -(Metrics.horizontalPadding + Metrics.scrollerAllowance)
+                ),
+                valueField.firstBaselineAnchor.constraint(equalTo: titleField.firstBaselineAnchor),
+                valueField.leadingAnchor.constraint(
+                    greaterThanOrEqualTo: titleField.trailingAnchor,
+                    constant: Metrics.detailSpacing
+                ),
+            ])
+        }
 
         let pathField = NSTextField(labelWithString: entry.detail ?? "")
         pathField.font = .systemFont(ofSize: Metrics.detailedPathFontSize)
@@ -931,13 +987,11 @@ private final class CommandPaletteEntryRowView: NSView {
         addSubview(pathField)
 
         NSLayoutConstraint.activate([
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
-            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: Metrics.detailedIconSize),
-            iconView.heightAnchor.constraint(equalToConstant: Metrics.detailedIconSize),
-
-            titleField.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: Metrics.iconSpacing),
-            titleField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
+            titleField.leadingAnchor.constraint(equalTo: textLeading, constant: textInset),
+            titleField.trailingAnchor.constraint(
+                lessThanOrEqualTo: trailingAnchor,
+                constant: -Metrics.horizontalPadding
+            ),
             titleField.bottomAnchor.constraint(equalTo: centerYAnchor, constant: -Metrics.detailedTitleSpacing / 2),
 
             pathField.leadingAnchor.constraint(equalTo: titleField.leadingAnchor),
