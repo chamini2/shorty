@@ -140,7 +140,15 @@ the search box needs for deleting to the start of the line.
 
 ### Clipboard History
 
-- Keeps the last 200 items, newest first, without duplicates, as one scrollable list.
+- Keeps the last 1000 items, newest first, without duplicates, as one scrollable
+  list. Text costs a few hundred bytes an entry, so the history is something to
+  search rather than a short undo stack. Set your own with:
+
+  ```yaml
+  clipboard:
+    history-limit: 10000
+  ```
+
 - Keeps plain text and rich text (RTF, HTML, etc.).
 - Keeps copied images, up to 10 MB each, beside the history in `ClipboardAssets/`. Pasting writes the image data, not a file path.
 - Keeps copied files as paths rather than copies, so pasting hands over the file itself. An entry whose file has moved says so and is skipped.

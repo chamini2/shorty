@@ -112,6 +112,7 @@ public final class ShortyController {
             numpadAliases = configuration.numpadAliases
             loadedCommandBox = configuration.commandBox
             loadedClipboardSettings = configuration.clipboard
+            clipboardHistoryStore.setMaximumItems(configuration.clipboard.historyLimit)
             commandBoxSettingsHandler?(loadedCommandBox)
             if didCompleteStart, loadedBindings != previousBindings {
                 applyBindings(changedFrom: previousBindings)

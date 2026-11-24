@@ -24,8 +24,16 @@ public struct ClipboardSettings: Equatable, Sendable {
     /// URL and touches the network never.
     public let linkPreviewsEnabled: Bool
 
-    public init(linkPreviewsEnabled: Bool = true) {
+    /// How many copies are kept. Text entries cost a few hundred bytes each,
+    /// so the default is generous enough to search rather than to undo.
+    public let historyLimit: Int
+
+    public init(
+        linkPreviewsEnabled: Bool = true,
+        historyLimit: Int = ClipboardConstants.maxStoredItems
+    ) {
         self.linkPreviewsEnabled = linkPreviewsEnabled
+        self.historyLimit = historyLimit
     }
 }
 
@@ -51,13 +59,29 @@ public enum ClipboardSettingsParser {
 
             switch name {
             case "link-previews":
-                settings = ClipboardSettings(linkPreviewsEnabled: try boolean(from: pair.value, name: name))
+                settings = ClipboardSettings(
+                    linkPreviewsEnabled: try boolean(from: pair.value, name: name),
+                    historyLimit: settings.historyLimit
+                )
+            case "history-limit":
+                settings = ClipboardSettings(
+                    linkPreviewsEnabled: settings.linkPreviewsEnabled,
+                    historyLimit: try count(from: pair.value, name: name)
+                )
             default:
                 throw ClipboardSettingsError.unknownSetting(name)
             }
         }
 
         return settings
+    }
+
+    private static func count(from node: Node, name: String) throws -> Int {
+        guard let value = node.int, value > 0 else {
+            throw ClipboardSettingsError.invalidBlock("Setting `\(name)` must be a whole number above zero.")
+        }
+
+        return value
     }
 
     private static func boolean(from node: Node, name: String) throws -> Bool {

@@ -545,8 +545,11 @@ public struct ClipboardRepresentation: Codable, Equatable, Sendable {
 }
 
 public enum ClipboardConstants {
-    public static let maxStoredItems = 200
-    public static let maxVisibleItems = 200
+    /// A clipboard worth searching rather than a short undo stack: entries
+    /// are a few hundred bytes of text each, so a thousand costs little and
+    /// keeps a week of work within reach.
+    public static let maxStoredItems = 1_000
+    public static let maxVisibleItems = 1_000
     public static let maxMenuItemTitleLength = 60
     public static let maxPickerItemTitleLength = 240
     public static let pollInterval: TimeInterval = 0.75
@@ -556,7 +559,9 @@ public enum ClipboardConstants {
 
 public final class ClipboardHistoryStore {
     private let url: URL
-    private let maxStoredItems: Int
+    /// Settable, since it comes from config that is read after the store is
+    /// built and can change while Shorty runs.
+    private var maxStoredItems: Int
     private let lock = NSRecursiveLock()
     private let assetStore: ClipboardAssetStore
     private var items: [ClipboardItem]
@@ -572,6 +577,27 @@ public final class ClipboardHistoryStore {
         self.items = Self.loadItems(from: url)
         // A crash or a hand-edited history file can leave files behind.
         assetStore.removeOrphans(keeping: self.items.compactMap(\.image), graceSeconds: 300)
+    }
+
+    /// Trims at once when the limit comes down, so a smaller number in the
+    /// config takes effect rather than waiting for the next copy.
+    public func setMaximumItems(_ limit: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard limit != maxStoredItems else {
+            return
+        }
+
+        maxStoredItems = limit
+
+        guard items.count > limit else {
+            return
+        }
+
+        items = Array(items.prefix(limit))
+        assetStore.removeOrphans(keeping: items.compactMap(\.image))
+        save()
     }
 
     public static var defaultURL: URL {
