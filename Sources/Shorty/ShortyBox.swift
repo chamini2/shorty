@@ -43,7 +43,7 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         static let bottomMargin: CGFloat = 20
         /// Enough to read against a busy desktop, little enough to still
         /// look like glass.
-        static let tintOpacity: CGFloat = 0.72
+        static let tintOpacity: CGFloat = 0.45
     }
 
     private let panel: ShortyBoxPanel
