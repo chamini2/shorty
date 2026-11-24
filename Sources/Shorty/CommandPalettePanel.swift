@@ -437,11 +437,19 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     /// show it in Finder, or take its path. Everything else ignores the
     /// modifiers.
     private static func modified(_ action: CommandAction) -> CommandAction {
+        let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        // Shift on a cascade parks the window you are in: whichever window
+        // that is, the rest stack up behind it.
+        if case let .moveWindow(.cascade(options)) = action, flags.contains(.shift) {
+            return .moveWindow(
+                .cascade(WindowCascadeOptions(scope: options.scope, keepsFocused: true))
+            )
+        }
+
         guard case let .openFile(path) = action else {
             return action
         }
-
-        let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
         if flags.contains(.command) {
             return .revealFile(path: path)

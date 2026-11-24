@@ -12,6 +12,8 @@ public enum WindowMoveCommand: Equatable, Sendable {
     case resize(CGFloat)
     /// Put the window back where it was before Shorty first moved it.
     case restore
+    /// Lay the windows out in a stack, each one down and right of the last.
+    case cascade(WindowCascadeOptions)
 }
 
 /// Accessibility elements are CoreFoundation types: equal and hashable through
@@ -38,6 +40,12 @@ public final class WindowMover {
 
     @discardableResult
     public func moveFocusedWindow(_ command: WindowMoveCommand) -> ActivationResult {
+        // A cascade is about every window rather than the focused one, so it
+        // goes its own way from here.
+        if case let .cascade(options) = command {
+            return cascade(options)
+        }
+
         let context = focusedWindowContext()
         let candidates = prioritizedCandidates(context.candidates, focusedPID: context.pid)
         guard !candidates.isEmpty else {
@@ -173,6 +181,10 @@ public final class WindowMover {
                 screens: screens,
                 direction: direction
             )
+        case .cascade:
+            // Handled before a single window is ever chosen.
+            return nil
+
         case .maximize, .almostMaximize:
             let orderedScreens = WindowGeometryPlanner.orderedScreens(screens)
             guard let screenIndex = WindowGeometryPlanner.screenIndex(containing: currentFrame, screens: orderedScreens) else {
@@ -190,6 +202,151 @@ public final class WindowMover {
                 screens: screens,
                 direction: direction
             )
+        }
+    }
+
+    /// Stacks the windows on this space, each one down and right of the last,
+    /// so none is completely hidden behind another.
+    ///
+    /// Laid out back to front, which leaves whatever was in front still in
+    /// front and still focused: a command that rearranges the screen should
+    /// not also move you to another window.
+    private func cascade(_ options: WindowCascadeOptions) -> ActivationResult {
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        var onScreen = OnScreenWindows.current(excluding: ownPID)
+        // The topmost window, taken before anything is filtered out, is the
+        // one you were in when the box opened.
+        let focused = onScreen.first
+
+        if options.scope == .application {
+            // The owner of the topmost window, not whatever `NSWorkspace`
+            // calls frontmost: by the time a command runs, the box has been
+            // in front and the answer is Shorty.
+            guard let focusedPID = onScreen.first?.ownerPID else {
+                let message = "No app in front to cascade."
+                console.error(message)
+                return ActivationResult(succeeded: false, message: message)
+            }
+
+            onScreen = onScreen.filter { $0.ownerPID == focusedPID }
+        }
+
+        guard !onScreen.isEmpty else {
+            let message = options.scope == .application
+                ? "That app has no windows on this desktop."
+                : "No windows on this desktop to cascade."
+            console.info(message)
+            return ActivationResult(succeeded: false, message: message)
+        }
+
+        let screens = Self.accessibilityVisibleFrames()
+
+        // One display at a time: the windows in front of you are the ones on
+        // the screen the frontmost window is on.
+        guard let screen = screens.first(where: { $0.contains(Self.centre(of: onScreen[0].frame)) })
+            ?? screens.first else {
+            let message = "No screens found for window move."
+            console.error(message)
+            return ActivationResult(succeeded: false, message: message)
+        }
+
+        let here = onScreen.filter { screen.contains(Self.centre(of: $0.frame)) }
+        // The pinned window: left where it is, and the corner the rest flow
+        // out of.
+        let pinned = options.keepsFocused ? focused.flatMap { focused in
+            here.first { $0.ownerPID == focused.ownerPID && $0.frame == focused.frame }
+        } : nil
+        let movable = here.filter { window in
+            guard let pinned else {
+                return true
+            }
+
+            return !(window.ownerPID == pinned.ownerPID && window.frame == pinned.frame)
+        }
+        let elements = matchingElements(for: movable)
+
+        guard !elements.isEmpty, elements.count + (pinned == nil ? 0 : 1) > 1 else {
+            let message = "Nothing to cascade: only one window is open here."
+            console.info(message)
+            return ActivationResult(succeeded: false, message: message)
+        }
+
+        // Back to front, so the last one laid out and raised is the one that
+        // was already in front.
+        let ordered = Array(elements.reversed())
+        // With a window pinned it takes the first place in the stack and the
+        // rest step out from its corner; its own frame is then dropped, since
+        // it is not going anywhere.
+        let sizes = (pinned.map { [$0.frame.size] } ?? []) + ordered.map(\.frame.size)
+        var frames = WindowGeometryPlanner.cascadeFrames(
+            sizes: sizes,
+            on: screen,
+            from: pinned?.frame.origin
+        )
+
+        if pinned != nil {
+            frames.removeFirst()
+        }
+
+        // The pinned window goes to the back first, so the stack reads as
+        // flowing out from under it.
+        if let pinned, let element = matchingElements(for: [pinned]).first {
+            _ = AXUIElementPerformAction(element.element, kAXRaiseAction as CFString)
+        }
+
+        for (window, frame) in zip(ordered, frames) {
+            restorePoints.record(window.frame, for: WindowKey(element: window.element))
+            _ = setFrame(frame, on: window.element, screens: screens)
+            _ = AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
+        }
+
+        let message = pinned == nil
+            ? "Cascaded \(ordered.count) windows."
+            : "Cascaded \(ordered.count) windows around the one you are in."
+        console.info(message)
+        return ActivationResult(succeeded: true, message: message)
+    }
+
+    private static func centre(of frame: CGRect) -> CGPoint {
+        CGPoint(x: frame.midX, y: frame.midY)
+    }
+
+    /// Pairs each on-screen window with the accessibility element that can
+    /// move it, by frame: the window list gives no handle, and titles are
+    /// blank without Screen Recording permission.
+    private func matchingElements(
+        for windows: [OnScreenWindow]
+    ) -> [(element: AXUIElement, frame: CGRect)] {
+        var byPID: [pid_t: [AXUIElement]] = [:]
+
+        for window in Set(windows.map(\.ownerPID)) {
+            byPID[window] = windowsAttribute(on: AXUIElementCreateApplication(window))
+        }
+
+        var used: Set<WindowKey> = []
+
+        return windows.compactMap { window in
+            guard let candidates = byPID[window.ownerPID] else {
+                return nil
+            }
+
+            let match = candidates.first { element in
+                guard !used.contains(WindowKey(element: element)),
+                      let elementFrame = frame(of: element) else {
+                    return false
+                }
+
+                return WindowGeometryPlanner.isApproximately(elementFrame.origin, window.frame.origin)
+                    && WindowGeometryPlanner.isApproximately(elementFrame.size, window.frame.size)
+            }
+
+            guard let match else {
+                return nil
+            }
+
+            used.insert(WindowKey(element: match))
+
+            return (match, window.frame)
         }
     }
 

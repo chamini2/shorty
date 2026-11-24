@@ -313,6 +313,24 @@ public enum CommandCatalog {
         }
 
         entries.append(
+            windowEntry(
+                "cascade",
+                "Cascade Windows",
+                .cascade(WindowCascadeOptions(scope: .space)),
+                ["stack", "arrange", "tile", "all", "desktop", "space", "overlap"],
+                detail: "shift ⏎ stacks the rest around this one"
+            )
+        )
+        entries.append(
+            windowEntry(
+                "cascade-app",
+                "Cascade App Windows",
+                .cascade(WindowCascadeOptions(scope: .application)),
+                ["stack", "arrange", "app", "same", "application"],
+                detail: "shift ⏎ stacks the rest around this one"
+            )
+        )
+        entries.append(
             windowEntry("restore", "Restore", .restore, ["undo", "revert", "back", "original"])
         )
 
@@ -326,11 +344,13 @@ public enum CommandCatalog {
         _ id: String,
         _ title: String,
         _ command: WindowMoveCommand,
-        _ extraKeywords: [String]
+        _ extraKeywords: [String],
+        detail: String? = nil
     ) -> CommandEntry {
         CommandEntry(
             id: "window.\(id)",
             title: title,
+            detail: detail,
             action: .moveWindow(command),
             keywords: ["window", "move"] + extraKeywords
         )

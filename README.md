@@ -97,6 +97,7 @@ Rectangle-style hotkeys for the focused window:
 | `ctrl+option+left` | Left half of the current monitor. If already there, right half of the monitor to the left (wraps). |
 | `ctrl+option+right` | Right half of the current monitor. If already there, left half of the monitor to the right (wraps). |
 | `ctrl+option+cmd+up` | Maximize to the current monitor |
+| _(cascade rows)_ | `return` stacks every window on this desktop, each one down and right of the last, keeping the one you are in at the front. `shift+return` leaves that window where it is and stacks the rest out from its corner |
 | _(unbound)_ | `almost-maximize`: nine tenths of the monitor, centred |
 | `ctrl+option+cmd+left` | Move to the monitor on the left, keeping proportional position and size (wraps) |
 | `ctrl+option+cmd+right` | Move to the monitor on the right, keeping proportional position and size (wraps) |
@@ -209,7 +210,7 @@ Entries that take you somewhere carry a `›`:
 | `Time ›` | the current time in each configured zone |
 | `Applications ›` | Every app on the machine, with its icon. Opening one brings it forward when it is already running |
 | `Files ›` | Search your home folder by name and contents, through the Spotlight index. `return` opens a file, `cmd+return` reveals it in Finder, `option+return` copies its path |
-| `Window ›` | `Maximize`, `Almost Maximize`, `Make Larger`, `Make Smaller`, the halves, the monitor moves when a second display is attached, and `Restore` |
+| `Window ›` | `Cascade Windows` and `Cascade App Windows`, `Maximize`, `Almost Maximize`, `Make Larger`, `Make Smaller`, the halves, the monitor moves when a second display is attached, and `Restore` |
 | `Keep the Mac Awake` | holds off idle and display sleep, like `caffeinate` |
 
 Typing a timestamp or a size converts it, above the commands:
