@@ -61,6 +61,9 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
     /// A file whose icon stands for this entry, such as an app bundle. The
     /// catalog knows nothing about drawing; it only says where to look.
     public let iconPath: String?
+    /// An SF Symbol standing for the entry, for rows with no file to take an
+    /// icon from.
+    public let symbolName: String?
     public let layout: CommandEntryLayout
     /// The row its list opens on. Time marks the local zone: the list is
     /// about elsewhere, but you read it from where you are.
@@ -76,6 +79,7 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
         marker: WorldMapMarker? = nil,
         opensSelected: Bool = false,
         iconPath: String? = nil,
+        symbolName: String? = nil,
         layout: CommandEntryLayout = .compact
     ) {
         self.id = id
@@ -87,6 +91,7 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
         self.marker = marker
         self.opensSelected = opensSelected
         self.iconPath = iconPath
+        self.symbolName = symbolName
         self.layout = layout
     }
 
@@ -111,6 +116,7 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
             marker: marker,
             opensSelected: opensSelected,
             iconPath: iconPath,
+            symbolName: symbolName,
             layout: layout
         )
     }
@@ -183,7 +189,8 @@ public enum CommandCatalog {
             return []
         }
 
-        return CommandTransformerEngine.evaluate(query, transformers: transformers, now: now)
+        return calculatorEntry(for: query)
+            + CommandTransformerEngine.evaluate(query, transformers: transformers, now: now)
             .filter(\.isComplete)
             .compactMap { evaluation in
                 guard let text = evaluation.resultText else {
@@ -197,6 +204,26 @@ public enum CommandCatalog {
                     action: .copyText(text)
                 )
             }
+    }
+
+    /// The answer to what was typed, when it is arithmetic. Shown grouped for
+    /// reading; what lands on the pasteboard has no commas in it, since a
+    /// comma pasted into a spreadsheet is not a number.
+    private static func calculatorEntry(for query: String) -> [CommandEntry] {
+        guard Calculator.isWorthEvaluating(query), let value = Calculator.evaluate(query) else {
+            return []
+        }
+
+        return [
+            CommandEntry(
+                id: "result:calculator",
+                title: Calculator.display(value),
+                detail: query.trimmingCharacters(in: .whitespacesAndNewlines),
+                action: .copyText(Calculator.plain(value)),
+                symbolName: "equal.square",
+                layout: .detailed
+            ),
+        ]
     }
 
     private static func actionEntries(

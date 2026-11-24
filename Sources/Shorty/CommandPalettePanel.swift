@@ -828,7 +828,7 @@ private final class CommandPaletteEntryRowView: NSView {
         var textLeading = leadingAnchor
         var textInset = Metrics.horizontalPadding
 
-        if entry.iconPath != nil {
+        if entry.iconPath != nil || entry.symbolName != nil {
             let iconView = NSImageView()
             iconView.image = icon
             iconView.imageScaling = .scaleProportionallyUpOrDown
@@ -897,12 +897,20 @@ private final class CommandPaletteEntryRowView: NSView {
         ])
     }
 
+    private static func symbol(_ name: String) -> NSImage? {
+        NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(
+                NSImage.SymbolConfiguration(pointSize: Metrics.detailedIconSize - 6, weight: .regular)
+            )
+    }
+
     /// Name on top, where it is read first, and the path under it in full.
     /// Half a search for `README` comes back with the same name every time,
     /// so the path is the part that decides.
     private func configureDetailed(entry: CommandEntry, isSelected: Bool, icon: NSImage?) {
         let iconView = NSImageView()
-        iconView.image = icon
+        iconView.image = icon ?? entry.symbolName.flatMap(Self.symbol)
+        iconView.contentTintColor = icon == nil ? .secondaryLabelColor : nil
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconView)
