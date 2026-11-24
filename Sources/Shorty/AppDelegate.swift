@@ -286,6 +286,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let .moveWindow(command):
             controller.performWindowMove(command)
 
+        case let .openFile(path):
+            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+
+        case let .revealFile(path):
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+
         case let .openApplication(path):
             // Through `NSWorkspace`, so an app already running is brought
             // forward instead of started a second time.

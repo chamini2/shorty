@@ -10,6 +10,10 @@ public enum CommandAction: Equatable, Sendable {
     case setKeepAwake(Bool)
     /// Open an app by bundle path, or bring it forward when it is running.
     case openApplication(path: String)
+    /// Open a file in whatever usually opens it.
+    case openFile(path: String)
+    /// Show a file in Finder rather than opening it.
+    case revealFile(path: String)
 }
 
 /// Where an entry leads. A plain list of entries covers most of it; a view is
@@ -18,10 +22,27 @@ public enum CommandAction: Equatable, Sendable {
 public indirect enum CommandDestination: Equatable, Sendable {
     case list([CommandEntry])
     case view(CommandViewKind)
+    /// A list that cannot be written down in advance: its rows come from
+    /// whatever is typed once it is open.
+    case search(CommandSearchKind)
+}
+
+public enum CommandSearchKind: Equatable, Sendable {
+    case files
 }
 
 public enum CommandViewKind: Equatable, Sendable {
     case clipboard(ClipboardMenuKind)
+}
+
+/// How much room a row is given.
+public enum CommandEntryLayout: Equatable, Sendable {
+    /// One line: a title, and a detail beside it.
+    case compact
+    /// Two lines and a larger icon, for rows where the detail is what tells
+    /// one result from another. A file search needs it: half the matches are
+    /// called `README.md` and only the path says which is which.
+    case detailed
 }
 
 public struct CommandEntry: Equatable, Identifiable, Sendable {
@@ -40,6 +61,7 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
     /// A file whose icon stands for this entry, such as an app bundle. The
     /// catalog knows nothing about drawing; it only says where to look.
     public let iconPath: String?
+    public let layout: CommandEntryLayout
     /// The row its list opens on. Time marks the local zone: the list is
     /// about elsewhere, but you read it from where you are.
     public let opensSelected: Bool
@@ -53,7 +75,8 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
         keywords: [String] = [],
         marker: WorldMapMarker? = nil,
         opensSelected: Bool = false,
-        iconPath: String? = nil
+        iconPath: String? = nil,
+        layout: CommandEntryLayout = .compact
     ) {
         self.id = id
         self.title = title
@@ -64,6 +87,7 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
         self.marker = marker
         self.opensSelected = opensSelected
         self.iconPath = iconPath
+        self.layout = layout
     }
 
     /// Whether picking this takes you somewhere rather than finishing a job.
@@ -86,7 +110,8 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
             keywords: keywords,
             marker: marker,
             opensSelected: opensSelected,
-            iconPath: iconPath
+            iconPath: iconPath,
+            layout: layout
         )
     }
 }
@@ -193,6 +218,13 @@ public enum CommandCatalog {
                 keywords: ["app", "apps", "open", "launch", "run"]
             ),
             CommandEntry(
+                id: "files",
+                title: "Files",
+                detail: "Search your home folder",
+                destination: .search(.files),
+                keywords: ["file", "find", "spotlight", "document", "folder", "open"]
+            ),
+            CommandEntry(
                 id: "clipboard.history",
                 title: "Clipboard History",
                 detail: history.isEmpty ? "Nothing copied yet" : "\(history.count) entries",
@@ -234,6 +266,20 @@ public enum CommandCatalog {
                 action: .openApplication(path: application.path),
                 keywords: [application.directoryName],
                 iconPath: application.path
+            )
+        }
+    }
+
+    /// One row per file, labelled with the folder it sits in.
+    public static func fileEntries(_ hits: [FileHit]) -> [CommandEntry] {
+        hits.map { hit in
+            CommandEntry(
+                id: hit.id,
+                title: hit.name,
+                detail: hit.displayPath,
+                action: .openFile(path: hit.path),
+                iconPath: hit.path,
+                layout: .detailed
             )
         }
     }

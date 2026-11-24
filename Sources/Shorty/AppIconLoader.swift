@@ -8,9 +8,10 @@ import AppKit
 /// elsewhere and the rows are told when each one is ready.
 @MainActor
 final class AppIconLoader {
-    /// Rows are small; a bitmap at twice that is sharp on every display and
-    /// far cheaper to keep than the original artwork.
-    nonisolated static let pointSize: CGFloat = 16
+    /// The largest a row draws an icon, which the detailed file rows set. A
+    /// bitmap at twice that is sharp on every display, and scaling it down
+    /// for the small rows costs nothing.
+    nonisolated static let pointSize: CGFloat = 32
 
     private var icons: [String: NSImage] = [:]
     private var loading: Set<String> = []
