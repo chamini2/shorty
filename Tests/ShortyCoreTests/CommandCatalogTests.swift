@@ -100,14 +100,21 @@ final class CommandCatalogTests: XCTestCase {
     }
 
     func testFuzzyQueriesFindTheRightEntry() {
-        XCTAssertEqual(root("sf").first?.title, "Time › San Francisco")
         XCTAssertEqual(root("clp").first?.title, "Clipboard History")
         XCTAssertTrue(root("maxi").contains { $0.title == "Window › Maximize" })
     }
 
     func testSearchReachesInsideListsAndSaysWhereFrom() {
         XCTAssertTrue(root("maximize").contains { $0.title == "Window › Maximize" })
-        XCTAssertTrue(root("tokyo").contains { $0.title == "Time › Tokyo" })
+        XCTAssertTrue(root("restore").contains { $0.title == "Window › Restore" })
+    }
+
+    /// Zones are searched inside Time rather than from here: the list is
+    /// every zone on earth, and the top level would be nothing but cities.
+    func testZonesAreNotSearchedFromTheTopLevel() {
+        XCTAssertTrue(root("tokyo").isEmpty)
+        XCTAssertTrue(root("sf").isEmpty)
+        XCTAssertTrue(root("time").contains { $0.title == "Time" })
     }
 
     func testMatchingAListShowsTheListNotItsEntries() {
@@ -123,17 +130,33 @@ final class CommandCatalogTests: XCTestCase {
         XCTAssertEqual(maximize.action, .moveWindow(.maximize))
     }
 
-    func testTimeGroupHoldsTheZones() throws {
+    func testTimeLeadsToASearchOfEveryZone() throws {
         let time = try XCTUnwrap(root("").first { $0.title == "Time" })
 
-        guard case let .list(entries) = time.destination else {
-            return XCTFail("Expected Time to lead to a list")
-        }
+        XCTAssertEqual(time.destination, .search(.timeZones))
+    }
 
-        let zones = CommandCatalog.entries(in: entries, query: "")
+    func testTimeGroupHoldsTheZones() {
+        let zones = CommandCatalog.timeZoneEntries(
+            query: "",
+            now: now,
+            localTimeZone: madrid,
+            settings: settings
+        )
+
         XCTAssertEqual(zones.map(\.title), ["San Francisco", "Tokyo"])
-        XCTAssertEqual(zones.first { $0.title == "Tokyo" }?.detail, "1970-01-01 09:00:00 UTC+9")
-        XCTAssertEqual(CommandCatalog.entries(in: entries, query: "tokyo").count, 1)
+        // The clock sits at the end of the row and the offset underneath.
+        XCTAssertEqual(zones.first { $0.title == "Tokyo" }?.trailing, "1970-01-01 09:00:00")
+        XCTAssertEqual(zones.first { $0.title == "Tokyo" }?.detail, "Japan · UTC+9")
+
+        let searched = CommandCatalog.timeZoneEntries(
+            query: "tokyo",
+            now: now,
+            localTimeZone: madrid,
+            settings: settings
+        )
+
+        XCTAssertEqual(searched.filter { $0.timeZoneIdentifier == "Asia/Tokyo" }.count, 1)
     }
 
     /// The list keeps the order the config gives it, so landing on the local
@@ -143,28 +166,19 @@ final class CommandCatalogTests: XCTestCase {
         command-box:
           timezones: [San Francisco, Tokyo, Madrid]
         """)
-        let entries = CommandCatalog.rootEntries(
+        let zones = CommandCatalog.timeZoneEntries(
             query: "",
             now: now,
             localTimeZone: madrid,
             settings: configured
         )
-        let time = try XCTUnwrap(entries.first { $0.title == "Time" })
-
-        guard case let .list(zones) = time.destination else {
-            return XCTFail("Expected Time to lead to a list")
-        }
 
         XCTAssertEqual(zones.map(\.title), ["San Francisco", "Tokyo", "Madrid"])
         XCTAssertEqual(zones.firstIndex(where: \.opensSelected), 2)
     }
 
-    func testNothingOpensSelectedWhenTheLocalZoneIsNotListed() throws {
-        let time = try XCTUnwrap(root("").first { $0.title == "Time" })
-
-        guard case let .list(zones) = time.destination else {
-            return XCTFail("Expected Time to lead to a list")
-        }
+    func testNothingOpensSelectedWhenTheLocalZoneIsNotListed() {
+        let zones = CommandCatalog.timeZoneEntries(query: "", now: now, localTimeZone: madrid, settings: settings)
 
         XCTAssertFalse(zones.contains { $0.opensSelected })
     }

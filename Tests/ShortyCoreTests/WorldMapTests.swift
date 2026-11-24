@@ -50,20 +50,19 @@ final class WorldMapTests: XCTestCase {
 
     func testTimeEntriesCarryTheirPlace() throws {
         let madrid = TimeZone(identifier: "Europe/Madrid")!
-        let root = CommandCatalog.rootEntries(query: "", localTimeZone: madrid)
-        let time = try XCTUnwrap(root.first { $0.title == "Time" })
-
-        guard case let .list(entries) = time.destination else {
-            return XCTFail("Expected Time to lead to a list")
-        }
+        let entries = CommandCatalog.timeZoneEntries(query: "", localTimeZone: madrid)
 
         XCTAssertEqual(entries.map(\.title), ["Madrid", "UTC"])
         XCTAssertEqual(entries[0].marker, TimeZoneLocations.marker(for: madrid))
+        // A zone with no city of its own is drawn at its meridian.
         XCTAssertEqual(entries[1].marker, .meridian(longitude: 0))
 
-        // The place survives being found from the root by search.
-        let found = try XCTUnwrap(CommandCatalog.rootEntries(query: "madrid", localTimeZone: madrid).first)
-        XCTAssertEqual(found.title, "Time › Madrid")
-        XCTAssertEqual(found.marker, entries[0].marker)
+        // The place survives being found by search, which is what the map
+        // behind the list draws.
+        let found = try XCTUnwrap(
+            CommandCatalog.timeZoneEntries(query: "rome", localTimeZone: madrid).first
+        )
+        XCTAssertEqual(found.title, "Rome")
+        XCTAssertEqual(found.marker, TimeZoneLocations.marker(for: TimeZone(identifier: "Europe/Rome")!))
     }
 }
