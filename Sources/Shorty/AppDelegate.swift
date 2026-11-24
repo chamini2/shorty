@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let box = ShortyBoxController()
     private lazy var clipboardPickerPanel = ClipboardPickerPanelController(box: box)
     private let applicationIndex = ApplicationIndex()
+    private let recentFiles = RecentFileStore()
     private var presentedPickerKind: ClipboardMenuKind?
     private var commandPaletteTargetApplication: NSRunningApplication?
     private lazy var commandPalettePanel = CommandPalettePanelController(box: box)
@@ -287,10 +288,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.performWindowMove(command)
 
         case let .openFile(path):
+            recentFiles.record(path)
             NSWorkspace.shared.open(URL(fileURLWithPath: path))
 
         case let .revealFile(path):
+            recentFiles.record(path)
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+
+        case let .copyFilePath(path):
+            recentFiles.record(path)
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(path, forType: .string)
 
         case let .openApplication(path):
             // Through `NSWorkspace`, so an app already running is brought

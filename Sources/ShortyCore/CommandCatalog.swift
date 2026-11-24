@@ -14,6 +14,9 @@ public enum CommandAction: Equatable, Sendable {
     case openFile(path: String)
     /// Show a file in Finder rather than opening it.
     case revealFile(path: String)
+    /// Put a file's path on the pasteboard. Its own case rather than
+    /// `copyText`, so reaching for a file still counts as reaching for it.
+    case copyFilePath(path: String)
 }
 
 /// Where an entry leads. A plain list of entries covers most of it; a view is

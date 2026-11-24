@@ -14,6 +14,16 @@ public struct FileHit: Equatable, Sendable, Identifiable {
         self.folder = folder
     }
 
+    /// From a path alone, for files Shorty remembers opening.
+    public init(path: String) {
+        let url = URL(fileURLWithPath: path)
+        self.init(
+            name: url.lastPathComponent,
+            path: path,
+            folder: url.deletingLastPathComponent().lastPathComponent
+        )
+    }
+
     public var id: String {
         "file.\(path)"
     }
@@ -62,7 +72,7 @@ public final class FileSearcher {
             && !path.contains("/node_modules/")
     }
 
-    private var searchText = ""
+    private var searchText: String?
     private var query: NSMetadataQuery?
     private var pending: DispatchWorkItem?
     private var handler: (([FileHit]) -> Void)?
@@ -92,6 +102,21 @@ public final class FileSearcher {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.debounce, execute: work)
     }
 
+    /// What the machine opened last, whenever that was: Finder calls this
+    /// Recents. Spotlight records it as `kMDItemLastUsedDate`, which only
+    /// real openings set, so it stays free of the generated files that fill
+    /// a list sorted by when something was last written.
+    public func recentlyOpened(completion: @escaping ([FileHit]) -> Void) {
+        pending?.cancel()
+        stop()
+        handler = completion
+        start(
+            NSPredicate(format: "kMDItemLastUsedDate > %@", Date.distantPast as NSDate),
+            sortedBy: NSMetadataItemLastUsedDateKey,
+            matching: nil
+        )
+    }
+
     public func cancel() {
         pending?.cancel()
         pending = nil
@@ -100,16 +125,22 @@ public final class FileSearcher {
     }
 
     private func start(_ text: String) {
-        let query = NSMetadataQuery()
-        query.predicate = NSPredicate(
-            format: "kMDItemFSName LIKE[cd] %@ OR kMDItemTextContent CONTAINS[cd] %@",
-            "*\(text)*",
-            text
+        start(
+            NSPredicate(
+                format: "kMDItemFSName LIKE[cd] %@ OR kMDItemTextContent CONTAINS[cd] %@",
+                "*\(text)*",
+                text
+            ),
+            sortedBy: NSMetadataItemFSContentChangeDateKey,
+            matching: text
         )
+    }
+
+    private func start(_ predicate: NSPredicate, sortedBy key: String, matching text: String?) {
+        let query = NSMetadataQuery()
+        query.predicate = predicate
         query.searchScopes = [NSMetadataQueryUserHomeScope]
-        query.sortDescriptors = [
-            NSSortDescriptor(key: NSMetadataItemFSContentChangeDateKey, ascending: false),
-        ]
+        query.sortDescriptors = [NSSortDescriptor(key: key, ascending: false)]
 
         NotificationCenter.default.addObserver(
             self,
@@ -149,21 +180,29 @@ public final class FileSearcher {
             )
         }
 
-        let text = searchText
-        // A file whose name matches is what was meant; one that merely
-        // mentions the word comes after. Among the name matches the closest
-        // name wins, so searching `shorty` finds the folder called exactly
-        // that before the dozen files whose names merely start with it.
-        let named = candidates
-            .compactMap { hit -> (hit: FileHit, score: Int)? in
-                FuzzyMatcher.bestScore(text, in: [hit.name]).map { (hit, $0) }
+        let ranked: [FileHit]
+
+        if let text = searchText {
+            // A file whose name matches is what was meant; one that merely
+            // mentions the word comes after. Among the name matches the
+            // closest name wins, so searching `shorty` finds the folder
+            // called exactly that before the dozen files whose names merely
+            // start with it.
+            let named = candidates
+                .compactMap { hit -> (hit: FileHit, score: Int)? in
+                    FuzzyMatcher.bestScore(text, in: [hit.name]).map { (hit, $0) }
+                }
+                .sorted { $0.score > $1.score }
+                .map(\.hit)
+            let mentioned = candidates.filter { hit in
+                FuzzyMatcher.bestScore(text, in: [hit.name]) == nil
             }
-            .sorted { $0.score > $1.score }
-            .map(\.hit)
-        let mentioned = candidates.filter { hit in
-            FuzzyMatcher.bestScore(text, in: [hit.name]) == nil
+            ranked = named + mentioned
+        } else {
+            // Recents are already in the order that matters: when they were
+            // last opened.
+            ranked = candidates
         }
-        let ranked = named + mentioned
 
         stop()
         handler(Array(ranked.prefix(Self.resultLimit)))

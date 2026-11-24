@@ -39,6 +39,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     /// Set when the rows come from a search rather than from a fixed list.
     private let search: CommandSearchKind?
     private let fileSearcher = FileSearcher()
+    private let recentFiles = RecentFileStore()
     private var isPresentingNestedPicker = false
     private var pendingInsertionRange: NSRange?
     private var selectionRangeAfterRefocus: NSRange?
@@ -325,11 +326,14 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     private func searchFiles(query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        guard !trimmed.isEmpty else {
+            showRecentFiles()
+            return
+        }
+
         if trimmed.count < FileSearcher.minimumQueryLength {
             fileSearcher.cancel()
-            show(entries: trimmed.isEmpty
-                ? [CommandEntry(id: "files.hint", title: "Type to search your files")]
-                : [CommandEntry(id: "files.hint", title: "Keep typing…")])
+            show(entries: [CommandEntry(id: "files.hint", title: "Keep typing…")])
             return
         }
 
@@ -341,6 +345,27 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             show(entries: hits.isEmpty
                 ? [CommandEntry(id: "files.none", title: "No files match \(trimmed)")]
                 : CommandCatalog.fileEntries(hits))
+        }
+    }
+
+    /// With nothing typed, what you opened through Shorty, then what the
+    /// machine opened last. Yours lead: a short list of things you came to
+    /// this box for beats everything the Mac has touched.
+    private func showRecentFiles() {
+        let own = recentFiles.recent().map(FileHit.init(path:))
+        show(entries: CommandCatalog.fileEntries(own))
+
+        fileSearcher.recentlyOpened { [weak self] hits in
+            guard let self, searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
+            }
+
+            let ownPaths = Set(own.map(\.path))
+            let combined = own + hits.filter { !ownPaths.contains($0.path) }
+
+            show(entries: combined.isEmpty
+                ? [CommandEntry(id: "files.hint", title: "Type to search your files")]
+                : CommandCatalog.fileEntries(Array(combined.prefix(FileSearcher.resultLimit))))
         }
     }
 
@@ -469,7 +494,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         }
 
         if flags.contains(.option) {
-            return .copyText(path)
+            return .copyFilePath(path: path)
         }
 
         return action
