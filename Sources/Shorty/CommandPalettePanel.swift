@@ -826,6 +826,11 @@ private final class CommandPaletteEntryRowView: NSView {
         /// Room for the scroller, which floats over the rows rather than
         /// taking space of its own: without it the clock loses its seconds.
         static let scrollerAllowance: CGFloat = 12
+        /// A worked answer gets a row of its own shape.
+        static let resultHeight: CGFloat = 64
+        static let resultValueFontSize: CGFloat = 20
+        static let resultPadding: CGFloat = 16
+        static let resultNoteSpacing: CGFloat = 3
     }
 
 
@@ -853,9 +858,15 @@ private final class CommandPaletteEntryRowView: NSView {
             ? NSColor(calibratedWhite: 1, alpha: 0.12).cgColor
             : NSColor.clear.cgColor
 
-        if entry.layout == .detailed {
+        switch entry.layout {
+        case .detailed:
             configureDetailed(entry: entry, isSelected: isSelected, icon: icon)
             return
+        case .result:
+            configureResult(entry: entry, isSelected: isSelected)
+            return
+        case .compact:
+            break
         }
 
         let titleField = NSTextField(labelWithString: entry.navigates ? "\(entry.title) ›" : entry.title)
@@ -945,6 +956,84 @@ private final class CommandPaletteEntryRowView: NSView {
             )
     }
 
+    /// What was asked on the left, what it comes to on the right, each with
+    /// its note beneath. A worked answer reads as a sum rather than as a row
+    /// in a list, so it is given the room to look like one.
+    private func configureResult(entry: CommandEntry, isSelected: Bool) {
+        let question = Self.resultColumn(
+            value: entry.title,
+            note: entry.detail,
+            alignment: .left,
+            isSelected: isSelected
+        )
+        let answer = Self.resultColumn(
+            value: entry.trailing ?? "",
+            note: entry.trailingDetail,
+            alignment: .right,
+            isSelected: isSelected
+        )
+        let arrow = NSTextField(labelWithString: "→")
+        arrow.font = .systemFont(ofSize: Metrics.resultValueFontSize, weight: .light)
+        arrow.textColor = .tertiaryLabelColor
+        arrow.translatesAutoresizingMaskIntoConstraints = false
+
+        for view in [question, arrow, answer] {
+            addSubview(view)
+        }
+
+        NSLayoutConstraint.activate([
+            question.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.resultPadding),
+            question.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            arrow.centerXAnchor.constraint(equalTo: centerXAnchor),
+            arrow.centerYAnchor.constraint(equalTo: centerYAnchor),
+            arrow.leadingAnchor.constraint(
+                greaterThanOrEqualTo: question.trailingAnchor,
+                constant: Metrics.detailSpacing
+            ),
+
+            answer.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -(Metrics.resultPadding + Metrics.scrollerAllowance)
+            ),
+            answer.centerYAnchor.constraint(equalTo: centerYAnchor),
+            answer.leadingAnchor.constraint(
+                greaterThanOrEqualTo: arrow.trailingAnchor,
+                constant: Metrics.detailSpacing
+            ),
+        ])
+    }
+
+    private static func resultColumn(
+        value: String,
+        note: String?,
+        alignment: NSTextAlignment,
+        isSelected: Bool
+    ) -> NSStackView {
+        let valueField = NSTextField(labelWithString: value)
+        valueField.font = .systemFont(ofSize: Metrics.resultValueFontSize, weight: .semibold)
+        valueField.textColor = isSelected ? .labelColor : .secondaryLabelColor
+        valueField.alignment = alignment
+        valueField.lineBreakMode = .byTruncatingTail
+
+        let column = NSStackView(views: [valueField])
+        column.orientation = .vertical
+        column.alignment = alignment == .right ? .trailing : .leading
+        column.spacing = Metrics.resultNoteSpacing
+        column.translatesAutoresizingMaskIntoConstraints = false
+
+        if let note, !note.isEmpty {
+            let noteField = NSTextField(labelWithString: note)
+            noteField.font = .systemFont(ofSize: Metrics.detailFontSize)
+            noteField.textColor = .tertiaryLabelColor
+            noteField.alignment = alignment
+            noteField.lineBreakMode = .byTruncatingTail
+            column.addArrangedSubview(noteField)
+        }
+
+        return column
+    }
+
     /// Name on top, where it is read first, and the path under it in full.
     /// Half a search for `README` comes back with the same name every time,
     /// so the path is the part that decides.
@@ -1030,8 +1119,13 @@ private final class CommandPaletteEntryRowView: NSView {
     }
 
     static func height(for entry: CommandEntry, width: CGFloat) -> CGFloat {
-        guard entry.layout != .detailed else {
+        switch entry.layout {
+        case .detailed:
             return Metrics.detailedHeight
+        case .result:
+            return Metrics.resultHeight
+        case .compact:
+            break
         }
 
         guard let detail = entry.detail, isMultiline(detail) else {

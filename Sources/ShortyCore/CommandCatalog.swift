@@ -47,6 +47,9 @@ public enum CommandEntryLayout: Equatable, Sendable {
     /// one result from another. A file search needs it: half the matches are
     /// called `README.md` and only the path says which is which.
     case detailed
+    /// What was asked on the left, the answer on the right, each with a note
+    /// beneath it. For the rows that work something out.
+    case result
 }
 
 public struct CommandEntry: Equatable, Identifiable, Sendable {
@@ -71,6 +74,8 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
     /// Shown at the end of the title line of a detailed row, where a value
     /// belongs beside the name it answers for.
     public let trailing: String?
+    /// The note under `trailing` in a result row.
+    public let trailingDetail: String?
     public let layout: CommandEntryLayout
     /// The row its list opens on. Time marks the local zone: the list is
     /// about elsewhere, but you read it from where you are.
@@ -87,6 +92,7 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
         opensSelected: Bool = false,
         iconPath: String? = nil,
         trailing: String? = nil,
+        trailingDetail: String? = nil,
         symbolName: String? = nil,
         layout: CommandEntryLayout = .compact
     ) {
@@ -101,6 +107,7 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
         self.iconPath = iconPath
         self.symbolName = symbolName
         self.trailing = trailing
+        self.trailingDetail = trailingDetail
         self.layout = layout
     }
 
@@ -131,6 +138,7 @@ public struct CommandEntry: Equatable, Identifiable, Sendable {
             opensSelected: opensSelected,
             iconPath: iconPath,
             trailing: trailing,
+            trailingDetail: trailingDetail,
             symbolName: symbolName,
             layout: layout
         )
@@ -165,7 +173,12 @@ public enum CommandCatalog {
             applications: applications
         )
 
-        return resultEntries(query: normalizedQuery, now: now, transformers: transformers)
+        return resultEntries(
+            query: normalizedQuery,
+            now: now,
+            localTimeZone: localTimeZone,
+            transformers: transformers
+        )
             + cappingApplications(matching(actions, query: normalizedQuery))
     }
 
@@ -198,13 +211,15 @@ public enum CommandCatalog {
     private static func resultEntries(
         query: String,
         now: Date,
+        localTimeZone: TimeZone,
         transformers: [CommandTransformer]
     ) -> [CommandEntry] {
         guard !query.isEmpty else {
             return []
         }
 
-        return calculatorEntry(for: query)
+        return dateEntry(for: query, now: now, localTimeZone: localTimeZone)
+            + calculatorEntry(for: query)
             + CommandTransformerEngine.evaluate(query, transformers: transformers, now: now)
             .filter(\.isComplete)
             .compactMap { evaluation in
@@ -224,6 +239,29 @@ public enum CommandCatalog {
     /// The answer to what was typed, when it is arithmetic. Shown grouped for
     /// reading; what lands on the pasteboard has no commas in it, since a
     /// comma pasted into a spreadsheet is not a number.
+    /// Date arithmetic: `now - 1h in pst`, `today + 3d`, `2026-12-25 - now`.
+    private static func dateEntry(
+        for query: String,
+        now: Date,
+        localTimeZone: TimeZone
+    ) -> [CommandEntry] {
+        guard let result = DateExpression.evaluate(query, now: now, localTimeZone: localTimeZone) else {
+            return []
+        }
+
+        return [
+            CommandEntry(
+                id: "result:date",
+                title: query.trimmingCharacters(in: .whitespacesAndNewlines),
+                detail: result.base,
+                action: .copyText(result.value),
+                trailing: result.value,
+                trailingDetail: result.valueDetail,
+                layout: .result
+            ),
+        ]
+    }
+
     private static func calculatorEntry(for query: String) -> [CommandEntry] {
         guard Calculator.isWorthEvaluating(query), let value = Calculator.evaluate(query) else {
             return []
@@ -232,11 +270,10 @@ public enum CommandCatalog {
         return [
             CommandEntry(
                 id: "result:calculator",
-                title: Calculator.display(value),
-                detail: query.trimmingCharacters(in: .whitespacesAndNewlines),
+                title: query.trimmingCharacters(in: .whitespacesAndNewlines),
                 action: .copyText(Calculator.plain(value)),
-                symbolName: "equal.square",
-                layout: .detailed
+                trailing: Calculator.display(value),
+                layout: .result
             ),
         ]
     }

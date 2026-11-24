@@ -297,6 +297,30 @@ Anything that does not parse shows no row at all, so a half-typed sum and a
 division by zero are quietly nothing rather than an error. A bare number shows
 nothing either: `42` answers itself.
 
+## Dates
+
+Date arithmetic typed into the command box, worked out as you type.
+
+```
+now - 1h in pst        today + 3d          tomorrow
+now + 1mo              15:00 in tokyo      3:30pm + 45m
+2026-12-25 + 2w        2026-12-25 - now
+```
+
+A base, any number of intervals, and a zone to read the answer in. The base is
+`now`, `today`, `tomorrow`, `yesterday`, a clock time such as `15:00` or `3pm`,
+a date such as `2026-12-25`, or epoch seconds. Intervals are `1h`, `30m`, `2d`,
+`1w`, `3mo`, `1y`, spelled out as `2 hours` if you prefer. Subtracting one
+moment from another gives the gap between them.
+
+Zones come from the same search the Time list uses, so `pst`, `tokyo`,
+`ecuador` and `Europe/Rome` all work.
+
+Months and years go through the calendar rather than multiplying seconds, so a
+month later is the same day of the next month and an hour either side of a
+daylight-saving change lands where you would expect. `m` is minutes and `mo` is
+months. `now` on its own shows nothing: the Time list answers that.
+
 ## Time Zones
 
 `Time` shows your own zone, named after its city, and UTC. Add more by name, no
