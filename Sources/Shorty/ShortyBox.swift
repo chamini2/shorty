@@ -44,7 +44,9 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
     }
 
     private let panel: ShortyBoxPanel
-    private let container = NSView()
+    /// Frosted rather than flat: the box floats over whatever it was opened
+    /// on top of, and letting that show through says so.
+    private let container = NSVisualEffectView()
     private var stack: [ShortyBoxContent] = []
     /// Live while the box is open; see `startKeyboardCapture`.
     private var keyboardTap: CFMachPort?
@@ -332,8 +334,14 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
             return stack.last?.boxHandlesKey(event) ?? false
         }
 
+        container.material = .popover
+        // Blurs what is behind the window, not merely what is behind the
+        // view, which is the whole point for a panel that floats.
+        container.blendingMode = .behindWindow
+        // Stays frosted while another app holds the keyboard, which an
+        // overlay terminal routinely does.
+        container.state = .active
         container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor(calibratedWhite: 0.12, alpha: 1).cgColor
         container.layer?.cornerRadius = Metrics.cornerRadius
         container.layer?.masksToBounds = true
         panel.contentView = container
