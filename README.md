@@ -262,6 +262,33 @@ hotkeys:
 
 Bindings apply on config reload, so no restart is needed.
 
+## Calculator
+
+Arithmetic typed into the command box is worked out as you type, and `return`
+copies the answer without the grouping commas.
+
+`+ - * / %`, `^` and `**` for powers, parentheses, and `1_000_000` or
+`1,000,000` for readability. A comma only groups digits in threes, so the one
+in `log(2,8)` separates arguments rather than making it `log(28)`.
+
+Functions take their argument with or without parentheses, `sqrt 100` and
+`sqrt(100)` alike, and bind tighter than any operator: `sqrt 16 + 9` is 13.
+More than one argument needs the parentheses and commas.
+
+- roots and sign: `sqrt`, `cbrt`, `abs`
+- rounding: `round`, `floor`, `ceil`
+- logs: `ln`, `log` (base 10, or `log(2, 8)` for base 2), `log2`, `log10`, `exp`
+- trigonometry, in radians: `sin`, `cos`, `tan`, `asin`, `acos`, `atan`
+- comparison: `min`, `max`
+- constants: `pi`, `e`, `tau`
+
+`%` is a remainder when something follows it and a percentage when nothing
+does: `10 % 3` is 1, `20%` is a fifth, `45 + 20%` is 54, `20% of 45` is 9.
+
+Anything that does not parse shows no row at all, so a half-typed sum and a
+division by zero are quietly nothing rather than an error. A bare number shows
+nothing either: `42` answers itself.
+
 ## Time Zones
 
 `Time` shows your own zone, named after its city, and UTC. Add more by name, no
