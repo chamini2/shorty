@@ -23,7 +23,7 @@ final class ClipboardPickerDetailView: NSView {
         static let previewShare: CGFloat = 2
     }
 
-    private let bodyScrollView = NSScrollView()
+    private let bodyScrollView = ShortyScrollView()
     private let bodyTextView = NSTextView()
     private let imageView = NSImageView()
     private let assetStore = ClipboardAssetStore()
@@ -129,11 +129,6 @@ final class ClipboardPickerDetailView: NSView {
 
         bodyScrollView.translatesAutoresizingMaskIntoConstraints = false
         bodyScrollView.documentView = bodyTextView
-        bodyScrollView.drawsBackground = false
-        bodyScrollView.hasVerticalScroller = true
-        bodyScrollView.autohidesScrollers = true
-        bodyScrollView.horizontalScrollElasticity = .none
-        bodyScrollView.borderType = .noBorder
 
         sectionTitleLabel.translatesAutoresizingMaskIntoConstraints = false
         sectionTitleLabel.font = .systemFont(ofSize: Metrics.rowFontSize, weight: .semibold)

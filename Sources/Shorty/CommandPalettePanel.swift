@@ -23,7 +23,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     private let header = ShortyBoxHeaderView()
     private var searchField: ShortyBoxSearchField { header.searchField }
     private let stackView = NSStackView()
-    private let scrollView = NSScrollView()
+    private let scrollView = ShortyScrollView()
     private let listContainer = CommandPaletteListContainerView()
     /// Behind the rows, for lists whose entries are places: the time zones.
     private let mapView = WorldMapView(frame: .zero)
@@ -204,7 +204,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         // The panel no longer grows with its rows, so the list scrolls.
         scrollView.documentView = listContainer
         scrollView.drawsBackground = false
-        scrollView.hasVerticalScroller = true
+
         scrollView.autohidesScrollers = true
         scrollView.horizontalScrollElasticity = .none
         scrollView.borderType = .noBorder

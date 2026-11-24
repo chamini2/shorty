@@ -41,12 +41,17 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         static let cornerRadius: CGFloat = 8
         static let topOffsetRatio: CGFloat = 0.20
         static let bottomMargin: CGFloat = 20
+        /// Enough to read against a busy desktop, little enough to still
+        /// look like glass.
+        static let tintOpacity: CGFloat = 0.72
     }
 
     private let panel: ShortyBoxPanel
     /// Frosted rather than flat: the box floats over whatever it was opened
     /// on top of, and letting that show through says so.
     private let container = NSVisualEffectView()
+    /// Sits over the frosted material to give the text some contrast.
+    private let tint = NSView()
     private var stack: [ShortyBoxContent] = []
     /// Live while the box is open; see `startKeyboardCapture`.
     private var keyboardTap: CFMachPort?
@@ -139,7 +144,9 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         let wasVisible = panel.isVisible
         content.boxWillPresent()
 
-        container.subviews.forEach { $0.removeFromSuperview() }
+        // Everything but the tint, which belongs to the box rather than to
+        // whatever it is showing.
+        container.subviews.filter { $0 !== tint }.forEach { $0.removeFromSuperview() }
         let view = content.view
         view.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(view)
@@ -313,7 +320,10 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.hidesOnDeactivate = false
-        panel.appearance = NSAppearance(named: .darkAqua)
+        // Follows the system rather than forcing dark: the frosted material
+        // is mixed with whatever is behind the panel, and a dark appearance
+        // over a light desktop was muddying it.
+        panel.appearance = nil
         panel.delegate = self
         // Escape is the box's: handling it in each content let one keystroke
         // pop twice, which closed the window instead of going back a level.
@@ -345,6 +355,24 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         container.layer?.cornerRadius = Metrics.cornerRadius
         container.layer?.masksToBounds = true
         panel.contentView = container
+
+        // Vibrancy alone has no contrast of its own: over a light desktop the
+        // box all but disappeared. The tint gives the text something to sit
+        // on and takes its colour from the appearance, so it is a dark wash
+        // in dark mode and a light one in light.
+        tint.translatesAutoresizingMaskIntoConstraints = false
+        tint.wantsLayer = true
+        tint.layer?.backgroundColor = NSColor.windowBackgroundColor
+            .withAlphaComponent(Metrics.tintOpacity)
+            .cgColor
+        container.addSubview(tint)
+
+        NSLayoutConstraint.activate([
+            tint.topAnchor.constraint(equalTo: container.topAnchor),
+            tint.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            tint.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            tint.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        ])
     }
 
     private func positionPanel() {

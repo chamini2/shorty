@@ -1166,7 +1166,7 @@ private final class ClipboardPickerCellView: NSTableCellView {
 }
 
 @MainActor
-private final class ClipboardPickerScrollView: NSScrollView {
+private final class ClipboardPickerScrollView: ShortyScrollView {
     override func scrollWheel(with event: NSEvent) {
         super.scrollWheel(with: event)
         contentView.scroll(to: NSPoint(x: 0, y: contentView.bounds.origin.y))
