@@ -183,6 +183,8 @@ public enum ClipboardItemDetailBuilder {
             return false
         }
 
+        // Something has to follow the `://`: `https://` on its own addresses
+        // nothing, and a preview of it would only fail.
         return scheme.allSatisfy { $0.isLetter || $0.isNumber || $0 == "+" || $0 == "-" || $0 == "." }
             && separator.upperBound < trimmed.endIndex
     }

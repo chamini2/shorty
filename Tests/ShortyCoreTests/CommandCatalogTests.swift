@@ -19,7 +19,10 @@ final class CommandCatalogTests: XCTestCase {
     func testEmptyQueryListsTheCommands() {
         let entries = root("")
 
-        XCTAssertEqual(entries.map(\.title), ["Clipboard History", "Time", "Keep the Mac Awake", "Window"])
+        XCTAssertEqual(
+            entries.map(\.title),
+            ["Clipboard History", "Time", "Keep the Mac Awake", "Window"]
+        )
         XCTAssertFalse(entries.contains { $0.title == "Snippets" }, "the picker already lists them")
         XCTAssertFalse(
             entries.contains {
@@ -30,18 +33,52 @@ final class CommandCatalogTests: XCTestCase {
         )
     }
 
-    func testWindowGroupHoldsTheMoves() throws {
-        let window = try XCTUnwrap(root("").first { $0.title == "Window" })
+    private func windowMoves(screenCount: Int) -> [String] {
+        let entries = CommandCatalog.rootEntries(
+            query: "",
+            now: now,
+            localTimeZone: madrid,
+            screenCount: screenCount
+        )
 
-        guard case let .list(moves) = window.destination else {
-            return XCTFail("Expected Window to lead to a list")
+        guard let window = entries.first(where: { $0.title == "Window" }),
+              case let .list(moves) = window.destination else {
+            return []
         }
 
+        return moves.map(\.title)
+    }
+
+    func testWindowGroupLeadsWithMaximizeAndEndsWithRestore() {
         XCTAssertEqual(
-            CommandCatalog.entries(in: moves, query: "").map(\.title),
-            ["Left Half", "Right Half", "Maximize", "Left Monitor", "Right Monitor"]
+            windowMoves(screenCount: 2),
+            [
+                "Maximize",
+                "Make Larger",
+                "Make Smaller",
+                "Left Half",
+                "Right Half",
+                "Left Monitor",
+                "Right Monitor",
+                "Restore",
+            ]
         )
-        XCTAssertEqual(CommandCatalog.entries(in: moves, query: "monitor").count, 2)
+    }
+
+    func testMonitorMovesAreLeftOutWithOneDisplay() {
+        XCTAssertEqual(
+            windowMoves(screenCount: 1),
+            ["Maximize", "Make Larger", "Make Smaller", "Left Half", "Right Half", "Restore"]
+        )
+
+        // Nor does searching surface something that could not work.
+        let found = CommandCatalog.rootEntries(
+            query: "monitor",
+            now: now,
+            localTimeZone: madrid,
+            screenCount: 1
+        )
+        XCTAssertFalse(found.contains { $0.title.hasSuffix("Left Monitor") })
     }
 
     func testEmptyQueryShowsNoConversions() {
@@ -63,14 +100,21 @@ final class CommandCatalogTests: XCTestCase {
     }
 
     func testFuzzyQueriesFindTheRightEntry() {
-        XCTAssertEqual(root("sf").first?.title, "Time › San Francisco")
         XCTAssertEqual(root("clp").first?.title, "Clipboard History")
         XCTAssertTrue(root("maxi").contains { $0.title == "Window › Maximize" })
     }
 
     func testSearchReachesInsideListsAndSaysWhereFrom() {
         XCTAssertTrue(root("maximize").contains { $0.title == "Window › Maximize" })
-        XCTAssertTrue(root("tokyo").contains { $0.title == "Time › Tokyo" })
+        XCTAssertTrue(root("restore").contains { $0.title == "Window › Restore" })
+    }
+
+    /// Zones are searched inside Time rather than from here: the list is
+    /// every zone on earth, and the top level would be nothing but cities.
+    func testZonesAreNotSearchedFromTheTopLevel() {
+        XCTAssertTrue(root("tokyo").isEmpty)
+        XCTAssertTrue(root("sf").isEmpty)
+        XCTAssertTrue(root("time").contains { $0.title == "Time" })
     }
 
     func testMatchingAListShowsTheListNotItsEntries() {
@@ -86,17 +130,57 @@ final class CommandCatalogTests: XCTestCase {
         XCTAssertEqual(maximize.action, .moveWindow(.maximize))
     }
 
-    func testTimeGroupHoldsTheZones() throws {
+    func testTimeLeadsToASearchOfEveryZone() throws {
         let time = try XCTUnwrap(root("").first { $0.title == "Time" })
 
-        guard case let .list(entries) = time.destination else {
-            return XCTFail("Expected Time to lead to a list")
-        }
+        XCTAssertEqual(time.destination, .search(.timeZones))
+    }
 
-        let zones = CommandCatalog.entries(in: entries, query: "")
+    func testTimeGroupHoldsTheZones() {
+        let zones = CommandCatalog.timeZoneEntries(
+            query: "",
+            now: now,
+            localTimeZone: madrid,
+            settings: settings
+        )
+
         XCTAssertEqual(zones.map(\.title), ["San Francisco", "Tokyo"])
-        XCTAssertEqual(zones.first { $0.title == "Tokyo" }?.detail, "1970-01-01 09:00:00 UTC+9")
-        XCTAssertEqual(CommandCatalog.entries(in: entries, query: "tokyo").count, 1)
+        // The clock sits at the end of the row and the offset underneath.
+        XCTAssertEqual(zones.first { $0.title == "Tokyo" }?.trailing, "1970-01-01 09:00:00")
+        XCTAssertEqual(zones.first { $0.title == "Tokyo" }?.detail, "Japan · UTC+9")
+
+        let searched = CommandCatalog.timeZoneEntries(
+            query: "tokyo",
+            now: now,
+            localTimeZone: madrid,
+            settings: settings
+        )
+
+        XCTAssertEqual(searched.filter { $0.timeZoneIdentifier == "Asia/Tokyo" }.count, 1)
+    }
+
+    /// The list keeps the order the config gives it, so landing on the local
+    /// zone is a matter of which row opens selected, not of sorting.
+    func testTimeOpensOnTheLocalZoneWhereverItIsListed() throws {
+        let configured = try CommandBoxSettingsParser.parse(yaml: """
+        command-box:
+          timezones: [San Francisco, Tokyo, Madrid]
+        """)
+        let zones = CommandCatalog.timeZoneEntries(
+            query: "",
+            now: now,
+            localTimeZone: madrid,
+            settings: configured
+        )
+
+        XCTAssertEqual(zones.map(\.title), ["San Francisco", "Tokyo", "Madrid"])
+        XCTAssertEqual(zones.firstIndex(where: \.opensSelected), 2)
+    }
+
+    func testNothingOpensSelectedWhenTheLocalZoneIsNotListed() {
+        let zones = CommandCatalog.timeZoneEntries(query: "", now: now, localTimeZone: madrid, settings: settings)
+
+        XCTAssertFalse(zones.contains { $0.opensSelected })
     }
 
     func testChevronMarksAnythingThatNavigates() throws {

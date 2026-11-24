@@ -7,7 +7,7 @@
 | 1 | [Global app shortcuts](#1-global-app-shortcuts): bind a hotkey to a specific window, not just an app | configured in YAML |
 | 2 | [Window switcher](#2-window-switcher): switch between windows, not apps | `cmd+tab`, `cmd+tilde/backquote` |
 | 3 | [Clipboard manager + snippets](#3-clipboard-manager--snippets): searchable clipboard history and YAML snippets | `cmd+shift+v`, `cmd+shift+b` |
-| 4 | [Command box](#4-command-box): epoch timestamps, byte units, time zones | `option+space` |
+| 4 | [Command box](#4-command-box): run what Shorty can do, convert what you type | `option+space` |
 
 Every built-in hotkey can be rebound or switched off in [Hotkeys](#hotkeys). A bound key cannot be reused by an app shortcut.
 
@@ -97,10 +97,19 @@ Rectangle-style hotkeys for the focused window:
 | `ctrl+option+left` | Left half of the current monitor. If already there, right half of the monitor to the left (wraps). |
 | `ctrl+option+right` | Right half of the current monitor. If already there, left half of the monitor to the right (wraps). |
 | `ctrl+option+cmd+up` | Maximize to the current monitor |
+| _(cascade rows)_ | `return` stacks every window on this desktop, each one down and right of the last, keeping the one you are in at the front. `shift+return` leaves that window where it is and stacks the rest out from its corner |
+| _(unbound)_ | `almost-maximize`: nine tenths of the monitor, centred |
 | `ctrl+option+cmd+left` | Move to the monitor on the left, keeping proportional position and size (wraps) |
 | `ctrl+option+cmd+right` | Move to the monitor on the right, keeping proportional position and size (wraps) |
 
-Windows stay clear of the menu bar and Dock. Some full-screen, minimized, or non-resizable windows refuse resizing.
+The command box holds these and three more: `Make Larger` and `Make Smaller`,
+which step a window by a twentieth of its display, and `Restore`, which puts it
+back where it was before Shorty first moved it. They work whether or not the
+hotkeys above are bound.
+
+Windows stay clear of the menu bar and Dock. An app that refuses to resize is
+put back where it was, rather than left moved, and Shorty says which app
+refused.
 
 ## 3. Clipboard Manager + Snippets
 
@@ -118,15 +127,53 @@ The picker is a floating panel with a search box. Choosing an item pastes it int
 | `right` | Open folder |
 | `left` / `escape` | Leave folder; `escape` at the top closes the picker |
 | `return` | Paste |
-| `cmd+return` | Paste as plain text (no formatting) |
+| `cmd+return` | Copy to the clipboard without pasting |
+| `option+return` | Paste as plain text (no formatting) |
 | `shift+return` | Trim each line, drop empty lines, join with no separator, save as a new history item, and paste |
+| `shift+backspace` | Delete the selected history entry |
+| `cmd+v` / `cmd+c` / `cmd+x` / `cmd+a` | Edit the search field |
+
+Escape clears the search first, then leaves a folder, then closes. The paste
+modifiers work on click too, and `shift` wins over `cmd`, which wins over
+`option`. Deleting is on `shift+backspace` rather than `cmd+backspace`, which
+the search box needs for deleting to the start of the line.
 
 ### Clipboard History
 
-- Keeps the last 200 items, newest first, without duplicates.
-- Keeps plain text and rich text (RTF, HTML, etc.). Images, files, and URLs are not stored.
+- Keeps the last 1000 items, newest first, without duplicates, as one scrollable
+  list. Text costs a few hundred bytes an entry, so the history is something to
+  search rather than a short undo stack. Set your own with:
+
+  ```yaml
+  clipboard:
+    history-limit: 10000
+  ```
+
+- Keeps plain text and rich text (RTF, HTML, etc.).
+- Keeps copied images, up to 10 MB each, beside the history in `ClipboardAssets/`. Pasting writes the image data, not a file path.
+- Keeps copied files as paths rather than copies, so pasting hands over the file itself. An entry whose file has moved says so and is skipped.
+- Skips anything the copier marked private: `org.nspasteboard.ConcealedType`,
+  which password managers and Keychain Access set on a copied secret, and the
+  transient markers apps use for text a person never typed. Those copies are
+  not read off the pasteboard at all.
+- Records which app a copy came from, by the front window rather than the frontmost app, so an overlay such as a terminal hotkey window is credited correctly.
+- Previews a copied link in the detail pane: the same card a social site
+  unfurls, built from the page's own `og:` tags, with its picture, title and
+  summary. Reading a link means fetching it, so this happens for the
+  link as it is copied, and for the opening stretch of the list when the
+  picker opens, so the card is usually there before it is asked for. Three
+  requests run at a time. Each answer is kept on disk for a week, so a link
+  seen before shows its card at once and never asks the site again. A page
+  with no picture of its own shows the site's icon. A page that says
+  nothing about itself shows no card. Turn it off with:
+
+  ```yaml
+  clipboard:
+    link-previews: false
+  ```
+
 - Persists across restarts in `~/Library/Application Support/Shorty/ClipboardHistory.json`.
-- The picker shows the 20 most recent items directly; older ones are in folders of 20 (`21 - 40`, …).
+- The right-hand pane shows the entry in full, with its source, type, size and when it was copied.
 
 ### Snippets
 
@@ -149,30 +196,46 @@ the config.
 Snippets sit above the clipboard history in the picker. The picker opens on the
 newest history entry, so snippets are one `up` away and never in the way.
 
-### Picker Keys
-
-| Key | Action |
-| --- | --- |
-| `return` | Paste the entry, keeping rich text |
-| `cmd+return` | Copy to the clipboard without pasting |
-| `option+return` | Paste as plain text |
-| `shift+return` | Paste with blank lines dropped and lines joined |
-| `cmd+backspace` | Delete the selected history entry |
-| `cmd+v` / `cmd+c` / `cmd+x` / `cmd+a` | Edit the search field |
-
-Modifiers also work on click, and `shift` wins over `cmd`, which wins over
-`option`.
 
 ## 4. Command Box
 
-`option+space` opens a command box. Type a command and see the result live. `return` copies the result to the clipboard; `escape` closes.
+`option+space` opens the command box. It lists what Shorty can do, so there is
+nothing to memorise, and converts what you type as you type it.
+
+| Key | Action |
+| --- | --- |
+| type | Filter by name or keyword, reaching inside lists |
+| `up` / `down` | Move selection |
+| `return` | Run the selection, or open it |
+| `right` | Open a list or the picker |
+| `left` / `escape` | Go back one level; `escape` at the top closes |
+
+Entries that take you somewhere carry a `›`:
+
+| Entry | What it holds |
+| --- | --- |
+| `Clipboard History ›` | the picker, with its previews and paste keys |
+| `Time ›` | the current time in each configured zone |
+| `Applications ›` | Every app on the machine, with its icon. Opening one brings it forward when it is already running |
+| `Files ›` | Search your home folder by name and contents, through the Spotlight index. Opens on the files you reached for here, then the ones the Mac opened last. `return` opens a file, `cmd+return` reveals it in Finder, `option+return` copies its path |
+| `Window ›` | `Cascade Windows` and `Cascade App Windows`, `Maximize`, `Almost Maximize`, `Make Larger`, `Make Smaller`, the halves, the monitor moves when a second display is attached, and `Restore` |
+| `Keep the Mac Awake` | holds off idle and display sleep, like `caffeinate` |
+
+Typing a timestamp or a size converts it, above the commands:
 
 | Type | Result |
 | --- | --- |
-| `1700000000` (10 digits) | Epoch seconds as UTC and San Francisco time, plus "2d 3h ago" |
+| `1700000000` (10 digits) | Epoch seconds as UTC and your own zone, plus "2d 3h ago" |
 | `17000000000000` (14 digits) | Epoch milliseconds, same output |
 | `1.5 gb` (units `b`, `bytes`, `kb`, `mb`, `gb`, `tb`) | The size in every other unit (1024-based) |
-| `utc time`, `et time`, `cet time`, `turkey time`, `dubai time`, `korea time`, `japan time` | Current time in that zone |
+
+Searching is fuzzy and reaches into lists, so `sf` finds `Time › San Francisco`
+and `maxi` finds `Window › Maximize` without opening either first. The box
+reopens on whatever you ran last, with the text selected, so the hotkey and
+`return` repeat it.
+
+The box and the clipboard picker share one window: choosing `Clipboard History`
+swaps the contents rather than opening a second panel, and `escape` comes back.
 
 Inside the command box, `cmd+shift+v` / `cmd+shift+b` open the clipboard / snippets picker and insert the chosen text at the cursor.
 
@@ -194,6 +257,7 @@ hotkeys:
     left-half: ctrl+option+left
     right-half: ctrl+option+right
     maximize: ctrl+option+cmd+up
+    almost-maximize: ctrl+option+cmd+return
     left-monitor: ctrl+option+cmd+left
     right-monitor: ctrl+option+cmd+right
 ```
@@ -206,16 +270,58 @@ hotkeys:
 
 Bindings apply on config reload, so no restart is needed.
 
-## Command Box
+## Calculator
 
-The command box lists what Shorty can do, so you can browse instead of
-remembering. Arrow keys move, `return` runs the selection, `right` opens a
-group and `left` leaves it. Typing filters by name, and timestamps or sizes you
-type are converted at the top of the list.
+Arithmetic typed into the command box is worked out as you type, and `return`
+copies the answer without the grouping commas.
 
-Commands that go somewhere carry a `›`: `Clipboard History` opens the picker,
-while `Time` and `Window` open lists of their own. `Keep the Mac Awake` holds
-off idle and display sleep until you turn it off again, like `caffeinate`.
+`+ - * / %`, `^` and `**` for powers, parentheses, and `1_000_000` or
+`1,000,000` for readability. A comma only groups digits in threes, so the one
+in `log(2,8)` separates arguments rather than making it `log(28)`.
+
+Functions take their argument with or without parentheses, `sqrt 100` and
+`sqrt(100)` alike, and bind tighter than any operator: `sqrt 16 + 9` is 13.
+More than one argument needs the parentheses and commas.
+
+- roots and sign: `sqrt`, `cbrt`, `abs`
+- rounding: `round`, `floor`, `ceil`
+- logs: `ln`, `log` (base 10, or `log(2, 8)` for base 2), `log2`, `log10`, `exp`
+- trigonometry, in radians: `sin`, `cos`, `tan`, `asin`, `acos`, `atan`
+- comparison: `min`, `max`
+- constants: `pi`, `e`, `tau`
+
+`%` is a remainder when something follows it and a percentage when nothing
+does: `10 % 3` is 1, `20%` is a fifth, `45 + 20%` is 54, `20% of 45` is 9.
+
+Anything that does not parse shows no row at all, so a half-typed sum and a
+division by zero are quietly nothing rather than an error. A bare number shows
+nothing either: `42` answers itself.
+
+## Dates
+
+Date arithmetic typed into the command box, worked out as you type.
+
+```
+now - 1h in pst        today + 3d          tomorrow
+now + 1mo              15:00 in tokyo      3:30pm + 45m
+2026-12-25 + 2w        2026-12-25 - now
+```
+
+A base, any number of intervals, and a zone to read the answer in. The base is
+`now`, `today`, `tomorrow`, `yesterday`, a clock time such as `15:00` or `3pm`,
+a date such as `2026-12-25`, or epoch seconds. Intervals are `1h`, `30m`, `2d`,
+`1w`, `3mo`, `1y`, spelled out as `2 hours` if you prefer. Subtracting one
+moment from another gives the gap between them.
+
+Zones come from the same search the Time list uses, so `pst`, `tokyo`,
+`ecuador` and `Europe/Rome` all work.
+
+Months and years go through the calendar rather than multiplying seconds, so a
+month later is the same day of the next month and an hour either side of a
+daylight-saving change lands where you would expect. `m` is minutes and `mo` is
+months. `now` on its own shows nothing: the Time list answers that.
+
+## Time Zones
 
 `Time` shows your own zone, named after its city, and UTC. Add more by name, no
 identifiers needed:
@@ -231,6 +337,17 @@ command-box:
 A city name, a zone identifier such as `Asia/Tokyo`, or an abbreviation such as
 `JST` all work, and the name you write becomes the label. A name that does not
 resolve fails the config with suggestions.
+
+Behind the list sits a faint world map with a dot on each zone's city. The
+selected one pulses. A zone with no city, such as UTC, shows its meridian
+instead.
+
+Zones are listed in the order written, and each shows its offset as `UTC-8` or
+`UTC+5:30` rather than an abbreviation, since `PST` says nothing about how far
+from UTC it is. A configured list replaces the default pair rather than adding
+to it. The list opens on your own zone wherever it sits in that order, since
+the other cities are read against the time where you are. Typing selects the
+best match instead.
 
 ## Setup
 
@@ -309,4 +426,10 @@ Shorty --help
 
 ### Menu Bar
 
-The menu shows status, config path, and loaded shortcuts, plus `Show Windows`, `Reload Config`, `Reveal Config`, `Open Accessibility Settings`, and `Quit`.
+The icon is a cup, which fills with coffee and steams while `Keep the Mac
+Awake` is on.
+
+The menu shows status, config path, and loaded shortcuts, plus `Keep the Mac
+Awake`, `Show Windows`, `Reload Config`, `Reveal Config`, `Open Accessibility
+Settings`, and `Quit`. Long lines are shortened in the middle so one path
+cannot stretch the menu; hover for the full text.

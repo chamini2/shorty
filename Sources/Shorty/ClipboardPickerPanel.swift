@@ -6,6 +6,8 @@ import UniformTypeIdentifiers
 @MainActor
 final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     private enum Metrics {
+        /// How far down the list cards are read ahead.
+        static let prefetchedLinks = 20
         static let panelWidth: CGFloat = 820
         static let listWidth: CGFloat = 320
         static let dividerWidth: CGFloat = 1
@@ -46,6 +48,12 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     private let tableView = ClipboardPickerTableView()
     private let scrollView = ClipboardPickerScrollView()
     private let detailView = ClipboardPickerDetailView()
+
+    var showsLinkPreviews = true {
+        didSet {
+            detailView.showsLinkPreviews = showsLinkPreviews
+        }
+    }
     private let detailDateFormatter = ClipboardItemDetailBuilder.defaultDateFormatter()
     private var mode: ClipboardPickerMode = .all
     private var history: [ClipboardItem] = []
@@ -111,8 +119,17 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         }
     }
 
+    /// Escape clears what you typed first, then leaves a folder, then lets
+    /// the box go back a level.
     func boxHandlesEscape() -> Bool {
-        leaveFolderIfNeeded()
+        if !searchField.stringValue.isEmpty {
+            searchField.stringValue = ""
+            query = ""
+            applyFilter(resetSelection: true)
+            return true
+        }
+
+        return leaveFolderIfNeeded()
     }
 
     func show(
@@ -325,6 +342,22 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
 
             return enterSelectedFolderIfNeeded()
 
+        case #selector(NSResponder.deleteBackward(_:)),
+            #selector(NSResponder.deleteForward(_:)):
+            // `shift+backspace` deletes the selected entry, so the field
+            // editor must not take a character out of the search box as well.
+            // AppKit drops the modifier when it turns a key into a command,
+            // so the shift is read back off the event.
+            guard Self.shiftModifierIsActive(event: NSApp.currentEvent) else {
+                return false
+            }
+
+            if consumeLocallyHandledCurrentEvent() {
+                return true
+            }
+
+            return deleteSelectedHistoryItem()
+
         case #selector(NSResponder.insertNewline(_:)),
             #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
             if consumeLocallyHandledCurrentEvent() {
@@ -367,6 +400,37 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         tableView.reloadData()
         syncTableWidth()
         selectCurrentRow(anchorContextAbove: true)
+        prefetchLinkPreviews()
+    }
+
+    /// The cards for the links on screen, fetched before they are asked for.
+    /// Only the opening stretch of the list: further down is scrolling the
+    /// user has not done, and the cards keep for a week once read.
+    func prefetchLinkPreviews(_ urls: [URL]) {
+        guard showsLinkPreviews else {
+            return
+        }
+
+        detailView.prefetch(urls)
+    }
+
+    private func prefetchLinkPreviews() {
+        guard showsLinkPreviews else {
+            return
+        }
+
+        let urls = entries
+            .prefix(Metrics.prefetchedLinks)
+            .compactMap { entry -> URL? in
+                guard case let .history(item) = entry,
+                      ClipboardItemDetailBuilder.isLink(item.plainText) else {
+                    return nil
+                }
+
+                return URL(string: item.plainText.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+
+        detailView.prefetch(urls)
     }
 
     private func resizePanelForCurrentEntries() {
@@ -427,7 +491,10 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
             return enterSelectedFolderIfNeeded()
 
         case UInt32(kVK_Delete), UInt32(kVK_ForwardDelete):
-            if event.modifierFlags.contains(.command) {
+            // Shift, not command: `cmd+backspace` means "delete to the start
+            // of the line" in a text field, and taking that away from the
+            // search box is worse than choosing a key the field ignores.
+            if event.modifierFlags.contains(.shift) {
                 return deleteSelectedHistoryItem()
             }
 
@@ -1099,7 +1166,7 @@ private final class ClipboardPickerCellView: NSTableCellView {
 }
 
 @MainActor
-private final class ClipboardPickerScrollView: NSScrollView {
+private final class ClipboardPickerScrollView: ShortyScrollView {
     override func scrollWheel(with event: NSEvent) {
         super.scrollWheel(with: event)
         contentView.scroll(to: NSPoint(x: 0, y: contentView.bounds.origin.y))

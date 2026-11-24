@@ -26,9 +26,161 @@ public enum WindowGeometryPlanner {
         }
     }
 
+    /// Grows or shrinks a window by a share of its display, keeping it where
+    /// it is on screen. Returns nil when there is nowhere left to go, so a
+    /// window already filling the screen says so rather than appearing to
+    /// refuse the change.
+    public static func resizedFrame(
+        for windowFrame: CGRect,
+        screens: [CGRect],
+        by step: CGFloat,
+        minimumRatio: CGFloat = 0.2
+    ) -> CGRect? {
+        let screens = orderedScreens(screens)
+
+        guard let index = screenIndex(containing: windowFrame, screens: screens) else {
+            return nil
+        }
+
+        let screen = screens[index]
+        let windowFrame = windowFrame.standardized
+
+        let minimum = CGSize(
+            width: screen.width * minimumRatio,
+            height: screen.height * minimumRatio
+        )
+        let size = CGSize(
+            width: min(max(windowFrame.width + screen.width * step, minimum.width), screen.width),
+            height: min(max(windowFrame.height + screen.height * step, minimum.height), screen.height)
+        )
+
+        guard !isApproximately(size, windowFrame.size) else {
+            return nil
+        }
+
+        // Grow around the middle of the window, then nudge back inside the
+        // screen rather than letting an edge slide off it.
+        let centred = CGRect(
+            x: windowFrame.midX - size.width / 2,
+            y: windowFrame.midY - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
+
+        return CGRect(
+            origin: fittingOrigin(for: centred, actualSize: size, screens: [screen]),
+            size: size
+        )
+    }
+
     public static func maximizeFrame(on screen: CGRect) -> CGRect {
         screen.standardized
     }
+
+    /// Maximize with a margin left around it, so what is behind stays in
+    /// sight. Rounded to whole points: a window placed on a half point is a
+    /// window drawn blurry.
+    public static func almostMaximizeFrame(on screen: CGRect, share: CGFloat = almostMaximizeShare) -> CGRect {
+        let screen = screen.standardized
+        let size = CGSize(
+            width: (screen.width * share).rounded(),
+            height: (screen.height * share).rounded()
+        )
+
+        return CGRect(
+            x: (screen.midX - size.width / 2).rounded(),
+            y: (screen.midY - size.height / 2).rounded(),
+            width: size.width,
+            height: size.height
+        )
+    }
+
+    /// Lays windows out in a stack, each one down and right of the last, so
+    /// every title bar stays in sight.
+    ///
+    /// Sizes are kept as they are, only clamped to the display: a window is
+    /// whatever size its owner wants it. The step shrinks to whatever makes
+    /// them all fit, so twenty windows stack tighter than three rather than
+    /// marching off the screen.
+    ///
+    /// The order given is the order laid out, so the last one ends up at the
+    /// front of the stack.
+    public static func cascadeFrames(
+        sizes: [CGSize],
+        on screen: CGRect,
+        step: CGFloat = cascadeStep,
+        from anchor: CGPoint? = nil
+    ) -> [CGRect] {
+        let fullScreen = screen.standardized
+
+        guard !sizes.isEmpty else {
+            return []
+        }
+
+        // A pinned window is the corner the rest flow out of, so the stack
+        // lives in what is left below and to the right of it. Pinned near the
+        // bottom right there would be nothing left, so the corner is pulled
+        // back far enough to leave the stack a usable share of the display.
+        let screen: CGRect
+
+        if let anchor {
+            let widest = min(fullScreen.width * maximumAnchorOffset, max(0, anchor.x - fullScreen.minX))
+            let tallest = min(fullScreen.height * maximumAnchorOffset, max(0, anchor.y - fullScreen.minY))
+
+            screen = CGRect(
+                x: fullScreen.minX + widest,
+                y: fullScreen.minY + tallest,
+                width: fullScreen.width - widest,
+                height: fullScreen.height - tallest
+            )
+        } else {
+            screen = fullScreen
+        }
+
+        let steps = CGFloat(max(1, sizes.count - 1))
+
+        // How far the stack reaches. Windows are usually as tall as the
+        // display, which leaves no room to step down: rather than pile them
+        // all along the top, the stack claims its share of the screen and the
+        // windows are trimmed to what is left.
+        let spread = CGSize(
+            width: min(step * steps, screen.width * maximumCascadeSpread),
+            height: min(step * steps, screen.height * maximumCascadeSpread)
+        )
+        let room = CGSize(width: screen.width - spread.width, height: screen.height - spread.height)
+        // A window smaller than the room it is given keeps its size.
+        let clamped = sizes.map {
+            CGSize(width: min($0.width, room.width), height: min($0.height, room.height))
+        }
+        let horizontal = spread.width / steps
+        let vertical = spread.height / steps
+
+        return clamped.enumerated().map { index, size in
+            let offset = CGFloat(index)
+
+            // Rounded for a crisp window, then held inside the display: a
+            // fraction of a point per step adds up to the last one hanging
+            // off the edge.
+            return CGRect(
+                x: min((screen.minX + offset * horizontal).rounded(), screen.maxX - size.width),
+                y: min((screen.minY + offset * vertical).rounded(), screen.maxY - size.height),
+                width: size.width,
+                height: size.height
+            )
+        }
+    }
+
+    /// Far enough apart that a title bar and a window's edge both show.
+    public static let cascadeStep: CGFloat = 32
+    /// At most this much of the display goes to the stack itself, so the
+    /// windows stay big enough to work in however many there are.
+    public static let maximumCascadeSpread: CGFloat = 0.35
+    /// How far into the display a pinned window may push the stack's corner.
+    /// Beyond this there is not enough room left to stack anything in.
+    public static let maximumAnchorOffset: CGFloat = 0.3
+
+    /// How much of the display "almost" is.
+    public static let almostMaximizeShare: CGFloat = 0.9
 
     public static func accessibilityFrame(
         screenFrame: CGRect,
@@ -142,6 +294,15 @@ public enum WindowGeometryPlanner {
             abs(frame.minY - target.minY) <= tolerance &&
             abs(frame.width - target.width) <= tolerance &&
             abs(frame.height - target.height) <= tolerance
+    }
+
+    public static func isApproximately(
+        _ size: CGSize,
+        _ target: CGSize,
+        tolerance: CGFloat = defaultTolerance
+    ) -> Bool {
+        abs(size.width - target.width) <= tolerance &&
+            abs(size.height - target.height) <= tolerance
     }
 
     public static func isApproximately(

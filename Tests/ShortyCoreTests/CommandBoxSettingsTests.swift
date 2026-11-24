@@ -50,23 +50,18 @@ final class CommandBoxSettingsTests: XCTestCase {
         command-box:
           timezones: [San Francisco, India, UTC]
         """)
-        let root = CommandCatalog.rootEntries(
+        let zones = CommandCatalog.timeZoneEntries(
             query: "",
             now: Date(timeIntervalSince1970: 1_700_000_000),
             localTimeZone: TimeZone(identifier: "America/Caracas")!,
             settings: settings
         )
 
-        guard case let .list(zones) = try XCTUnwrap(root.first { $0.title == "Time" }).destination else {
-            return XCTFail("Expected Time to lead to a list")
-        }
-
-        // Lining the clocks up is the row view's job, by reserving a column
-        // the width of the longest detail. Padding here would not survive:
-        // trailing spaces are dropped when a label is aligned.
-        XCTAssertEqual(zones.first?.detail, "2023-11-14 14:13:20 UTC-8")
+        // The clock sits at the end of the row without its offset, which the
+        // line underneath carries; copying takes the offset along.
+        XCTAssertEqual(zones.first?.trailing, "2023-11-14 14:13:20")
+        XCTAssertEqual(zones.first?.detail, "Los Angeles · United States · UTC-8")
         XCTAssertEqual(zones.first?.action, .copyText("2023-11-14 14:13:20 UTC-8"))
-        XCTAssertTrue(zones.allSatisfy { $0.detail == $0.detail?.trimmingCharacters(in: .whitespaces) })
     }
 
     func testZoneTimesSpellOutTheOffset() {
@@ -101,40 +96,30 @@ final class CommandBoxSettingsTests: XCTestCase {
         XCTAssertNil(TimeZoneResolver.cityLabel(for: TimeZone(secondsFromGMT: 0)!))
     }
 
-    func testTimeGroupLabelsTheLocalRowWithTheCity() throws {
-        let root = CommandCatalog.rootEntries(
+    func testTimeGroupLabelsTheLocalRowWithTheCity() {
+        let zones = CommandCatalog.timeZoneEntries(
             query: "",
             now: Date(timeIntervalSince1970: 0),
             localTimeZone: TimeZone(identifier: "America/Caracas")!
         )
-        let time = try XCTUnwrap(root.first { $0.title == "Time" })
 
-        guard case let .list(zones) = time.destination else {
-            return XCTFail("Expected Time to lead to a list")
-        }
-
-        XCTAssertEqual(CommandCatalog.entries(in: zones, query: "").map(\.title), ["Caracas", "UTC"])
+        XCTAssertEqual(zones.map(\.title), ["Caracas", "UTC"])
     }
 
-    func testConfiguredZonesReplaceLocalAndUTC() throws {
+    func testConfiguredZonesReplaceTheDefaultPair() throws {
         let settings = try CommandBoxSettingsParser.parse(yaml: """
         command-box:
           timezones:
             - Tokyo
         """)
 
-        let root = CommandCatalog.rootEntries(
+        let zones = CommandCatalog.timeZoneEntries(
             query: "",
             now: Date(timeIntervalSince1970: 0),
             localTimeZone: TimeZone(identifier: "Europe/Madrid")!,
             settings: settings
         )
-        let time = try XCTUnwrap(root.first { $0.title == "Time" })
 
-        guard case let .list(zones) = time.destination else {
-            return XCTFail("Expected Time to lead to a list")
-        }
-
-        XCTAssertEqual(CommandCatalog.entries(in: zones, query: "").map(\.title), ["Tokyo"])
+        XCTAssertEqual(zones.map(\.title), ["Tokyo"])
     }
 }

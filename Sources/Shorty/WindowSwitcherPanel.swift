@@ -66,7 +66,7 @@ private final class WindowSwitcherPanel: NSObject, NSTableViewDataSource, NSTabl
     private let screen: NSScreen
     private let panel: NSPanel
     private let tableView = NSTableView()
-    private let scrollView = NSScrollView()
+    private let scrollView = ShortyScrollView()
     private var windows: [SwitchableWindow] = []
     private var selectedIndex = 0
     private var iconCache: [pid_t: NSImage] = [:]
@@ -178,13 +178,9 @@ private final class WindowSwitcherPanel: NSObject, NSTableViewDataSource, NSTabl
         tableView.addTableColumn(titleColumn)
 
         scrollView.documentView = tableView
+        // The switcher is a fixed set of rows that never scrolls.
         scrollView.hasVerticalScroller = false
-        scrollView.hasHorizontalScroller = false
-        scrollView.autohidesScrollers = true
         scrollView.verticalScrollElasticity = .none
-        scrollView.horizontalScrollElasticity = .none
-        scrollView.borderType = .noBorder
-        scrollView.drawsBackground = false
 
         let container = NSView()
         container.wantsLayer = true

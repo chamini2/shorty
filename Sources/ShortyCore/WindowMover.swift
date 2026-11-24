@@ -5,11 +5,34 @@ import Foundation
 public enum WindowMoveCommand: Equatable, Sendable {
     case cycleHalf(WindowMoveDirection)
     case maximize
+    /// Maximize but leave a margin, so the window still reads as a window.
+    case almostMaximize
     case moveToMonitor(WindowMoveDirection)
+    /// Grow or shrink by a share of the display.
+    case resize(CGFloat)
+    /// Put the window back where it was before Shorty first moved it.
+    case restore
+    /// Lay the windows out in a stack, each one down and right of the last.
+    case cascade(WindowCascadeOptions)
+}
+
+/// Accessibility elements are CoreFoundation types: equal and hashable through
+/// CFEqual and CFHash, which is what lets a window be used as a key.
+struct WindowKey: Hashable {
+    let element: AXUIElement
+
+    static func == (lhs: WindowKey, rhs: WindowKey) -> Bool {
+        CFEqual(lhs.element, rhs.element)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(CFHash(element))
+    }
 }
 
 public final class WindowMover {
     private let console: Console
+    private var restorePoints = WindowRestoreStore<WindowKey>()
 
     public init(console: Console) {
         self.console = console
@@ -17,6 +40,12 @@ public final class WindowMover {
 
     @discardableResult
     public func moveFocusedWindow(_ command: WindowMoveCommand) -> ActivationResult {
+        // A cascade is about every window rather than the focused one, so it
+        // goes its own way from here.
+        if case let .cascade(options) = command {
+            return cascade(options)
+        }
+
         let context = focusedWindowContext()
         let candidates = prioritizedCandidates(context.candidates, focusedPID: context.pid)
         guard !candidates.isEmpty else {
@@ -32,6 +61,19 @@ public final class WindowMover {
             return ActivationResult(succeeded: false, message: message)
         }
 
+        if case .restore = command, restorePoints.count == 0 {
+            let message = "Nothing to restore: no window has been moved yet."
+            console.info(message)
+            return ActivationResult(succeeded: false, message: message)
+        }
+
+        // Nothing to move to, which is not the window refusing anything.
+        if case .moveToMonitor = command, screens.count < 2 {
+            let message = "Only one display, so there is no monitor to move to."
+            console.info(message)
+            return ActivationResult(succeeded: false, message: message)
+        }
+
         var readableWindowCount = 0
         for candidate in candidates {
             guard let currentFrame = frame(of: candidate.window) else {
@@ -41,7 +83,12 @@ public final class WindowMover {
             readableWindowCount += 1
             console.info("Trying window move candidate `\(candidate.source)` at \(Self.describe(currentFrame)).")
 
-            guard let targetFrame = targetFrame(for: command, currentFrame: currentFrame, screens: screens) else {
+            guard let targetFrame = targetFrame(
+                for: command,
+                window: candidate.window,
+                currentFrame: currentFrame,
+                screens: screens
+            ) else {
                 continue
             }
 
@@ -50,7 +97,44 @@ public final class WindowMover {
                 _ = setBool(false, attribute: fullScreenAttribute, on: candidate.window)
             }
 
+            // Taken before the move, and only for the first one, so restore
+            // returns to where the window started rather than to half way
+            // through a sequence of moves.
+            if case .restore = command {
+                restorePoints.forget(WindowKey(element: candidate.window))
+            } else {
+                restorePoints.record(currentFrame, for: WindowKey(element: candidate.window))
+            }
+
             if let appliedFrame = setFrame(targetFrame, on: candidate.window, screens: screens) {
+                let wantedNewSize = !WindowGeometryPlanner.isApproximately(targetFrame.size, currentFrame.size)
+                let sizeHeldStill = WindowGeometryPlanner.isApproximately(appliedFrame.size, currentFrame.size)
+
+                // The app refused to resize. It is judged by whether the size
+                // moved at all, not whether it hit the target: a terminal
+                // snapping to whole character cells has still obeyed.
+                if wantedNewSize, sizeHeldStill {
+                    // Put it back. Resizing and moving are one action, so a
+                    // refused resize should not leave the window somewhere
+                    // else; repeated presses were walking it across the
+                    // screen.
+                    restoreFrame(currentFrame, on: candidate.window)
+                    restorePoints.forget(WindowKey(element: candidate.window))
+
+                    let name = Self.appName(of: candidate.window)
+                    let message: String
+                    if case let .resize(step) = command {
+                        message = step > 0
+                            ? "\(name) will not grow any further."
+                            : "\(name) will not shrink any further."
+                    } else {
+                        message = "\(name) kept its size \(Self.describe(currentFrame.size))."
+                    }
+
+                    console.info(message)
+                    return ActivationResult(succeeded: false, message: message)
+                }
+
                 let message = "Moved focused window to \(Self.describe(appliedFrame))."
                 console.info(message)
                 return ActivationResult(succeeded: true, message: message)
@@ -65,6 +149,14 @@ public final class WindowMover {
             return ActivationResult(succeeded: false, message: message)
         }
 
+        if case let .resize(step) = command {
+            let message = step > 0
+                ? "Window is already as large as the display."
+                : "Window is already as small as Shorty will make it."
+            console.info(message)
+            return ActivationResult(succeeded: false, message: message)
+        }
+
         let message = "Focused window refused move or resize after trying \(readableWindowCount) candidate(s)."
         console.error(message)
         return ActivationResult(succeeded: false, message: message)
@@ -72,29 +164,189 @@ public final class WindowMover {
 
     private func targetFrame(
         for command: WindowMoveCommand,
+        window: AXUIElement,
         currentFrame: CGRect,
         screens: [CGRect]
     ) -> CGRect? {
         switch command {
+        case .restore:
+            return restorePoints.frame(for: WindowKey(element: window))
+
+        case let .resize(step):
+            return WindowGeometryPlanner.resizedFrame(for: currentFrame, screens: screens, by: step)
+
         case let .cycleHalf(direction):
             return WindowGeometryPlanner.halfCycleFrame(
                 for: currentFrame,
                 screens: screens,
                 direction: direction
             )
-        case .maximize:
+        case .cascade:
+            // Handled before a single window is ever chosen.
+            return nil
+
+        case .maximize, .almostMaximize:
             let orderedScreens = WindowGeometryPlanner.orderedScreens(screens)
             guard let screenIndex = WindowGeometryPlanner.screenIndex(containing: currentFrame, screens: orderedScreens) else {
                 return nil
             }
 
-            return WindowGeometryPlanner.maximizeFrame(on: orderedScreens[screenIndex])
+            let screen = orderedScreens[screenIndex]
+
+            return command == .maximize
+                ? WindowGeometryPlanner.maximizeFrame(on: screen)
+                : WindowGeometryPlanner.almostMaximizeFrame(on: screen)
         case let .moveToMonitor(direction):
             return WindowGeometryPlanner.monitorMoveFrame(
                 for: currentFrame,
                 screens: screens,
                 direction: direction
             )
+        }
+    }
+
+    /// Stacks the windows on this space, each one down and right of the last,
+    /// so none is completely hidden behind another.
+    ///
+    /// Laid out back to front, which leaves whatever was in front still in
+    /// front and still focused: a command that rearranges the screen should
+    /// not also move you to another window.
+    private func cascade(_ options: WindowCascadeOptions) -> ActivationResult {
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        var onScreen = OnScreenWindows.current(excluding: ownPID)
+        // The topmost window, taken before anything is filtered out, is the
+        // one you were in when the box opened.
+        let focused = onScreen.first
+
+        if options.scope == .application {
+            // The owner of the topmost window, not whatever `NSWorkspace`
+            // calls frontmost: by the time a command runs, the box has been
+            // in front and the answer is Shorty.
+            guard let focusedPID = onScreen.first?.ownerPID else {
+                let message = "No app in front to cascade."
+                console.error(message)
+                return ActivationResult(succeeded: false, message: message)
+            }
+
+            onScreen = onScreen.filter { $0.ownerPID == focusedPID }
+        }
+
+        guard !onScreen.isEmpty else {
+            let message = options.scope == .application
+                ? "That app has no windows on this desktop."
+                : "No windows on this desktop to cascade."
+            console.info(message)
+            return ActivationResult(succeeded: false, message: message)
+        }
+
+        let screens = Self.accessibilityVisibleFrames()
+
+        // One display at a time: the windows in front of you are the ones on
+        // the screen the frontmost window is on.
+        guard let screen = screens.first(where: { $0.contains(Self.centre(of: onScreen[0].frame)) })
+            ?? screens.first else {
+            let message = "No screens found for window move."
+            console.error(message)
+            return ActivationResult(succeeded: false, message: message)
+        }
+
+        let here = onScreen.filter { screen.contains(Self.centre(of: $0.frame)) }
+        // The pinned window: left where it is, and the corner the rest flow
+        // out of.
+        let pinned = options.keepsFocused ? focused.flatMap { focused in
+            here.first { $0.ownerPID == focused.ownerPID && $0.frame == focused.frame }
+        } : nil
+        let movable = here.filter { window in
+            guard let pinned else {
+                return true
+            }
+
+            return !(window.ownerPID == pinned.ownerPID && window.frame == pinned.frame)
+        }
+        let elements = matchingElements(for: movable)
+
+        guard !elements.isEmpty, elements.count + (pinned == nil ? 0 : 1) > 1 else {
+            let message = "Nothing to cascade: only one window is open here."
+            console.info(message)
+            return ActivationResult(succeeded: false, message: message)
+        }
+
+        // Back to front, so the last one laid out and raised is the one that
+        // was already in front.
+        let ordered = Array(elements.reversed())
+        // With a window pinned it takes the first place in the stack and the
+        // rest step out from its corner; its own frame is then dropped, since
+        // it is not going anywhere.
+        let sizes = (pinned.map { [$0.frame.size] } ?? []) + ordered.map(\.frame.size)
+        var frames = WindowGeometryPlanner.cascadeFrames(
+            sizes: sizes,
+            on: screen,
+            from: pinned?.frame.origin
+        )
+
+        if pinned != nil {
+            frames.removeFirst()
+        }
+
+        // The pinned window goes to the back first, so the stack reads as
+        // flowing out from under it.
+        if let pinned, let element = matchingElements(for: [pinned]).first {
+            _ = AXUIElementPerformAction(element.element, kAXRaiseAction as CFString)
+        }
+
+        for (window, frame) in zip(ordered, frames) {
+            restorePoints.record(window.frame, for: WindowKey(element: window.element))
+            _ = setFrame(frame, on: window.element, screens: screens)
+            _ = AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
+        }
+
+        let message = pinned == nil
+            ? "Cascaded \(ordered.count) windows."
+            : "Cascaded \(ordered.count) windows around the one you are in."
+        console.info(message)
+        return ActivationResult(succeeded: true, message: message)
+    }
+
+    private static func centre(of frame: CGRect) -> CGPoint {
+        CGPoint(x: frame.midX, y: frame.midY)
+    }
+
+    /// Pairs each on-screen window with the accessibility element that can
+    /// move it, by frame: the window list gives no handle, and titles are
+    /// blank without Screen Recording permission.
+    private func matchingElements(
+        for windows: [OnScreenWindow]
+    ) -> [(element: AXUIElement, frame: CGRect)] {
+        var byPID: [pid_t: [AXUIElement]] = [:]
+
+        for window in Set(windows.map(\.ownerPID)) {
+            byPID[window] = windowsAttribute(on: AXUIElementCreateApplication(window))
+        }
+
+        var used: Set<WindowKey> = []
+
+        return windows.compactMap { window in
+            guard let candidates = byPID[window.ownerPID] else {
+                return nil
+            }
+
+            let match = candidates.first { element in
+                guard !used.contains(WindowKey(element: element)),
+                      let elementFrame = frame(of: element) else {
+                    return false
+                }
+
+                return WindowGeometryPlanner.isApproximately(elementFrame.origin, window.frame.origin)
+                    && WindowGeometryPlanner.isApproximately(elementFrame.size, window.frame.size)
+            }
+
+            guard let match else {
+                return nil
+            }
+
+            used.insert(WindowKey(element: match))
+
+            return (match, window.frame)
         }
     }
 
@@ -303,10 +555,12 @@ public final class WindowMover {
     private func setFrame(_ targetFrame: CGRect, on window: AXUIElement, screens: [CGRect]) -> CGRect? {
         let originalFrame = frame(of: window)
 
-        _ = setSize(targetFrame.size, attribute: kAXSizeAttribute as CFString, on: window)
-        _ = setPoint(targetFrame.origin, attribute: kAXPositionAttribute as CFString, on: window)
-        _ = setSize(targetFrame.size, attribute: kAXSizeAttribute as CFString, on: window)
-        _ = setPoint(targetFrame.origin, attribute: kAXPositionAttribute as CFString, on: window)
+        withEnhancedUserInterfaceDisabled(for: window) {
+            _ = setSize(targetFrame.size, attribute: kAXSizeAttribute as CFString, on: window)
+            _ = setPoint(targetFrame.origin, attribute: kAXPositionAttribute as CFString, on: window)
+            _ = setSize(targetFrame.size, attribute: kAXSizeAttribute as CFString, on: window)
+            _ = setPoint(targetFrame.origin, attribute: kAXPositionAttribute as CFString, on: window)
+        }
 
         guard let firstAppliedFrame = frame(of: window) else {
             return nil
@@ -431,6 +685,62 @@ public final class WindowMover {
         }
 
         return size
+    }
+
+    /// Puts a window back after a change that did not take.
+    private func restoreFrame(_ frame: CGRect, on window: AXUIElement) {
+        withEnhancedUserInterfaceDisabled(for: window) {
+            _ = setPoint(frame.origin, attribute: kAXPositionAttribute as CFString, on: window)
+            _ = setSize(frame.size, attribute: kAXSizeAttribute as CFString, on: window)
+            _ = setPoint(frame.origin, attribute: kAXPositionAttribute as CFString, on: window)
+        }
+    }
+
+    private static func describe(_ size: CGSize) -> String {
+        "width=\(Int(size.width)), height=\(Int(size.height))"
+    }
+
+    private static func appName(of window: AXUIElement) -> String {
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(window, &pid) == .success else {
+            return "The window"
+        }
+
+        return NSRunningApplication(processIdentifier: pid)?.localizedName ?? "pid \(pid)"
+    }
+
+    /// Chrome and other Electron style apps turn on `AXEnhancedUserInterface`
+    /// as soon as an accessibility client attaches, and with it on they
+    /// animate a programmatic resize and then put the window back where it
+    /// was. Turning it off around the change makes the resize stick; it is
+    /// restored afterwards so the app keeps whatever behaviour it wanted.
+    private func withEnhancedUserInterfaceDisabled(for window: AXUIElement, _ body: () -> Void) {
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(window, &pid) == .success else {
+            body()
+            return
+        }
+
+        let application = AXUIElementCreateApplication(pid)
+        let attribute = "AXEnhancedUserInterface" as CFString
+
+        guard boolAttribute(attribute, on: application) == true else {
+            body()
+            return
+        }
+
+        _ = setBool(false, attribute: attribute, on: application)
+        body()
+        _ = setBool(true, attribute: attribute, on: application)
+    }
+
+    private func stringAttribute(_ attribute: CFString, on element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else {
+            return nil
+        }
+
+        return value as? String
     }
 
     private func setPoint(_ point: CGPoint, attribute: CFString, on element: AXUIElement) -> Bool {

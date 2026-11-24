@@ -18,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dynamicShortcutItems: [NSMenuItem] = []
     let box = ShortyBoxController()
     private lazy var clipboardPickerPanel = ClipboardPickerPanelController(box: box)
+    private let applicationIndex = ApplicationIndex()
+    private let recentFiles = RecentFileStore()
     private var presentedPickerKind: ClipboardMenuKind?
     private var commandPaletteTargetApplication: NSRunningApplication?
     private lazy var commandPalettePanel = CommandPalettePanelController(box: box)
@@ -44,6 +46,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.textCommandHandler = { [weak self] in
             DispatchQueue.main.async {
                 self?.showCommandPalette()
+            }
+        }
+        // A copied link is read the moment it lands, so its card is waiting
+        // by the time the picker is opened at all.
+        controller.clipboardCaptureHandler = { [weak self] item in
+            DispatchQueue.main.async {
+                self?.prefetchLinkPreview(for: item)
             }
         }
         commandPalettePanel.pickerRequestHandler = { [weak self] kind in
@@ -110,7 +119,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         stateMenuItem.isEnabled = false
         pathMenuItem.isEnabled = false
-        pathMenuItem.title = controller.options.configURL.path
+        pathMenuItem.title = Self.menuLine(controller.options.configURL.path)
+        pathMenuItem.toolTip = controller.options.configURL.path
         shortcutsHeaderItem.isEnabled = false
         emptyShortcutsItem.isEnabled = false
 
@@ -173,8 +183,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatus(_ message: String) {
-        stateMenuItem.title = message
+        // The full text goes in the tooltip: a status line long enough to
+        // mention a path stretches the whole menu to match.
+        stateMenuItem.title = Self.menuLine(message)
+        stateMenuItem.toolTip = message
         statusItem?.button?.toolTip = message
+    }
+
+    /// Keeps a menu line short enough that it does not set the menu's width,
+    /// shortening the home folder and dropping the middle of what is left,
+    /// where the ends carry the meaning.
+    static func menuLine(_ text: String, limit: Int = 44) -> String {
+        let shortened = (text as NSString).abbreviatingWithTildeInPath
+
+        guard shortened.count > limit else {
+            return shortened
+        }
+
+        let ellipsis = "…"
+        let keep = limit - ellipsis.count
+        let leading = shortened.prefix(keep - keep / 2)
+        let trailing = shortened.suffix(keep / 2)
+
+        return "\(leading)\(ellipsis)\(trailing)"
     }
 
     private func reloadShortcutItems() {
@@ -198,7 +229,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         for (offset, summary) in summaries.enumerated() {
-            let item = NSMenuItem(title: summary, action: nil, keyEquivalent: "")
+            let item = NSMenuItem(title: Self.menuLine(summary), action: nil, keyEquivalent: "")
+            item.toolTip = summary
             item.isEnabled = false
             dynamicShortcutItems.append(item)
             menu.insertItem(item, at: insertionIndex + offset)
@@ -244,6 +276,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func performCommandAction(_ action: CommandAction) {
+        controller.noteCommandBoxAction(String(describing: action))
+
         switch action {
         case let .copyText(text):
             let pasteboard = NSPasteboard.general
@@ -252,6 +286,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         case let .moveWindow(command):
             controller.performWindowMove(command)
+
+        case let .openFile(path):
+            recentFiles.record(path)
+            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+
+        case let .revealFile(path):
+            recentFiles.record(path)
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+
+        case let .copyFilePath(path):
+            recentFiles.record(path)
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(path, forType: .string)
+
+        case let .openApplication(path):
+            // Through `NSWorkspace`, so an app already running is brought
+            // forward instead of started a second time.
+            NSWorkspace.shared.openApplication(
+                at: URL(fileURLWithPath: path),
+                configuration: NSWorkspace.OpenConfiguration()
+            )
 
         case let .setKeepAwake(active):
             controller.setKeepAwake(active)
@@ -268,6 +324,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The menu bar cup fills while sleep is held off and empties when it is
     /// not, which says the same thing as the tick in the menu below it.
+    /// Reads a copied link's card straight away. The setting is honoured
+    /// here too: with previews off, nothing is fetched at all.
+    private func prefetchLinkPreview(for item: ClipboardItem) {
+        guard controller.loadedClipboardSettings.linkPreviewsEnabled,
+              ClipboardItemDetailBuilder.isLink(item.plainText),
+              let url = URL(string: item.plainText.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return
+        }
+
+        clipboardPickerPanel.prefetchLinkPreviews([url])
+    }
+
     private func updateKeepAwakeIndicator() {
         let active = controller.isKeepAwakeActive
         keepAwakeItem.state = active ? .on : .off
@@ -276,18 +344,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let image = NSImage(
-            systemSymbolName: active ? "cup.and.saucer.fill" : "cup.and.saucer",
-            accessibilityDescription: active ? "Shorty, keeping the Mac awake" : "Shorty"
-        )
-        image?.isTemplate = true
-        button.image = image
+        button.image = StatusIcon.cup(filled: active)
     }
 
     private func showCommandPalette() {
-        // The same hotkey closes it again.
-        if commandPalettePanel.isPresented {
-            commandPalettePanel.hide()
+        // The same hotkey closes the box, whatever it happens to be showing.
+        // Asking the command box whether it is presented was not the same
+        // question: with the picker on top it answered no, and the key opened
+        // the command box over it rather than putting the box away.
+        if box.isVisible {
+            box.close()
             return
         }
 
@@ -295,6 +361,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         commandPaletteTargetApplication = Self.currentPasteTargetApplication()
         commandPalettePanel.history = controller.recentClipboardItems()
         commandPalettePanel.keepAwake = controller.isKeepAwakeActive
+        commandPalettePanel.applications = applicationIndex.current()
+        box.boundHotKeys = controller.boundHotKeys
         commandPalettePanel.show()
     }
 
@@ -438,6 +506,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showClipboardPicker(_ kind: ClipboardMenuKind) {
         prepareClipboardPicker(kind)
+        box.boundHotKeys = controller.boundHotKeys
         box.open(clipboardPickerPanel)
     }
 
@@ -455,6 +524,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             mode = .snippetsOnly
         }
 
+        clipboardPickerPanel.showsLinkPreviews = controller.loadedClipboardSettings.linkPreviewsEnabled
         let targetApplication = capturedTarget ?? Self.currentPasteTargetApplication()
         clipboardPickerPanel.show(
             mode: mode,

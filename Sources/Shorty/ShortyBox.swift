@@ -1,5 +1,9 @@
 import AppKit
 import Carbon
+import ShortyCore
+// The tap callback is handed a `CGEvent`, which Core Graphics does not mark
+// `Sendable`. It is delivered on the main run loop and read there only.
+@preconcurrency import CoreGraphics
 
 /// Anything the box can show: the command list, a list of times, the clipboard
 /// picker. Each supplies a view and handles its own keys; the box handles the
@@ -37,11 +41,26 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         static let cornerRadius: CGFloat = 8
         static let topOffsetRatio: CGFloat = 0.20
         static let bottomMargin: CGFloat = 20
+        /// Enough to read against a busy desktop, little enough to still
+        /// look like glass.
+        static let tintOpacity: CGFloat = 0.45
     }
 
     private let panel: ShortyBoxPanel
-    private let container = NSView()
+    /// Frosted rather than flat: the box floats over whatever it was opened
+    /// on top of, and letting that show through says so.
+    private let container = NSVisualEffectView()
+    /// Sits over the frosted material to give the text some contrast.
+    private let tint = NSView()
     private var stack: [ShortyBoxContent] = []
+    /// Live while the box is open; see `startKeyboardCapture`.
+    private var keyboardTap: CFMachPort?
+    private var keyboardTapSource: CFRunLoopSource?
+    /// Set while a captured key is being handed to the panel, so the box's
+    /// key handler does not see the same keystroke twice.
+    private var isDeliveringCapturedKey = false
+    /// Hotkeys that must reach macOS even while the box has the keyboard.
+    var boundHotKeys: [KeyCombo] = []
 
     override init() {
         panel = ShortyBoxPanel(
@@ -103,6 +122,7 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
     }
 
     func close() {
+        stopKeyboardCapture()
         stack.forEach { $0.boxDidDismiss() }
         stack = []
         panel.orderOut(nil)
@@ -124,16 +144,21 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         let wasVisible = panel.isVisible
         content.boxWillPresent()
 
-        container.subviews.forEach { $0.removeFromSuperview() }
+        // Everything but the tint, which belongs to the box rather than to
+        // whatever it is showing.
+        container.subviews.filter { $0 !== tint }.forEach { $0.removeFromSuperview() }
         let view = content.view
         view.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(view)
 
+        // Fixed, not pinned to the container's edges: a content view's own
+        // constraints reach the window and can resize it, and a link preview
+        // with a large image was growing the box that way.
         NSLayoutConstraint.activate([
             view.topAnchor.constraint(equalTo: container.topAnchor),
             view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            view.widthAnchor.constraint(equalToConstant: Metrics.width),
+            view.heightAnchor.constraint(equalToConstant: Metrics.height),
         ])
 
         panel.setContentSize(NSSize(width: Metrics.width, height: Metrics.height))
@@ -141,12 +166,150 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
 
         if !wasVisible {
             positionPanel()
-            NSApp.activate(ignoringOtherApps: true)
-            panel.orderFrontRegardless()
-            panel.makeKeyAndOrderFront(nil)
+            takeFocus()
         }
 
         content.boxDidPresent(in: panel)
+    }
+
+    /// Brings the box forward and makes sure the keys come with it.
+    private func takeFocus() {
+        // The keys are read from the stream whatever activation does, since
+        // an overlay can hold the keyboard without ever activating and no
+        // check of who is frontmost can see it happen.
+        startKeyboardCapture()
+
+        NSApp.activate(ignoringOtherApps: true)
+        panel.orderFrontRegardless()
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    /// Takes the keyboard from the event stream while the box is open.
+    ///
+    /// Activation is not enough on its own. An overlay terminal, such as
+    /// Tern, holds the keyboard without ever activating: the box becomes
+    /// frontmost, draws its caret, and every keystroke still goes to the
+    /// overlay. `isKeyWindow` reports the key window inside this process and
+    /// says nothing about it, so there is no state to check and no moment at
+    /// which checking would help.
+    ///
+    /// Reading the keys from the stream is what works. They are consumed, so
+    /// nothing behind the box acts on them too, and the tap goes away the
+    /// moment the box closes.
+    private func startKeyboardCapture() {
+        guard keyboardTap == nil else {
+            return
+        }
+
+        let events = CGEventMask(1 << CGEventType.keyDown.rawValue)
+            | CGEventMask(1 << CGEventType.flagsChanged.rawValue)
+
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: events,
+            callback: { _, _, event, pointer in
+                guard let pointer else {
+                    return Unmanaged.passUnretained(event)
+                }
+
+                let controller = Unmanaged<ShortyBoxController>.fromOpaque(pointer).takeUnretainedValue()
+
+                return MainActor.assumeIsolated {
+                    controller.handleCaptured(event)
+                }
+            },
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            console.error("could not read the keyboard: Shorty needs Accessibility permission")
+            return
+        }
+
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+
+        keyboardTap = tap
+        keyboardTapSource = source
+    }
+
+    /// Hands a captured key to the window rather than straight to the first
+    /// responder.
+    ///
+    /// Calling `keyDown` on the responder delivers the keystroke but none of
+    /// what AppKit wraps around it: an event off the stream carries no window,
+    /// and without one a field editor never turns the key into an editing
+    /// command. `cmd+delete` and the arrows did nothing for exactly that
+    /// reason. Rebuilt against the panel, the key goes through the ordinary
+    /// path and behaves as it would in any other window.
+    private func deliver(_ event: NSEvent) {
+        guard let windowEvent = NSEvent.keyEvent(
+            with: event.type,
+            location: event.locationInWindow,
+            modifierFlags: event.modifierFlags,
+            timestamp: event.timestamp,
+            windowNumber: panel.windowNumber,
+            context: nil,
+            characters: event.characters ?? "",
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers ?? "",
+            isARepeat: event.isARepeat,
+            keyCode: event.keyCode
+        ) else {
+            return
+        }
+
+        // The panel asks its handler first; this key has been through that
+        // already, so the second pass is skipped.
+        isDeliveringCapturedKey = true
+        panel.sendEvent(windowEvent)
+        isDeliveringCapturedKey = false
+    }
+
+    private func stopKeyboardCapture() {
+        guard let keyboardTap else {
+            return
+        }
+
+        CGEvent.tapEnable(tap: keyboardTap, enable: false)
+
+        if let keyboardTapSource {
+            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), keyboardTapSource, .commonModes)
+        }
+
+        CFMachPortInvalidate(keyboardTap)
+        self.keyboardTap = nil
+        keyboardTapSource = nil
+    }
+
+    /// Hands a captured key to the box, and swallows it so the app behind
+    /// does not act on it too.
+    private func handleCaptured(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+        guard panel.isVisible, let keyEvent = NSEvent(cgEvent: event) else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        // Modifier changes are state, not input: the field needs to know
+        // about them but nothing else should be denied them.
+        guard keyEvent.type == .keyDown else {
+            panel.firstResponder?.flagsChanged(with: keyEvent)
+            return Unmanaged.passUnretained(event)
+        }
+
+        // A hotkey keeps working while the box is open: the same key that
+        // opened it closes it again, and swallowing it here would be the box
+        // holding itself open.
+        if boundHotKeys.contains(where: {
+            $0.matches(keyCode: keyEvent.keyCode, flags: event.flags)
+        }) {
+            return Unmanaged.passUnretained(event)
+        }
+
+        if panel.keyEventHandler?(keyEvent) != true {
+            deliver(keyEvent)
+        }
+
+        return nil
     }
 
     private func configurePanel() {
@@ -157,12 +320,15 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.hidesOnDeactivate = false
-        panel.appearance = NSAppearance(named: .darkAqua)
+        // Follows the system rather than forcing dark: the frosted material
+        // is mixed with whatever is behind the panel, and a dark appearance
+        // over a light desktop was muddying it.
+        panel.appearance = nil
         panel.delegate = self
         // Escape is the box's: handling it in each content let one keystroke
         // pop twice, which closed the window instead of going back a level.
         panel.keyEventHandler = { [weak self] event in
-            guard let self else {
+            guard let self, !isDeliveringCapturedKey else {
                 return false
             }
 
@@ -178,11 +344,35 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
             return stack.last?.boxHandlesKey(event) ?? false
         }
 
+        container.material = .popover
+        // Blurs what is behind the window, not merely what is behind the
+        // view, which is the whole point for a panel that floats.
+        container.blendingMode = .behindWindow
+        // Stays frosted while another app holds the keyboard, which an
+        // overlay terminal routinely does.
+        container.state = .active
         container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor(calibratedWhite: 0.12, alpha: 1).cgColor
         container.layer?.cornerRadius = Metrics.cornerRadius
         container.layer?.masksToBounds = true
         panel.contentView = container
+
+        // Vibrancy alone has no contrast of its own: over a light desktop the
+        // box all but disappeared. The tint gives the text something to sit
+        // on and takes its colour from the appearance, so it is a dark wash
+        // in dark mode and a light one in light.
+        tint.translatesAutoresizingMaskIntoConstraints = false
+        tint.wantsLayer = true
+        tint.layer?.backgroundColor = NSColor.windowBackgroundColor
+            .withAlphaComponent(Metrics.tintOpacity)
+            .cgColor
+        container.addSubview(tint)
+
+        NSLayoutConstraint.activate([
+            tint.topAnchor.constraint(equalTo: container.topAnchor),
+            tint.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            tint.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            tint.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        ])
     }
 
     private func positionPanel() {

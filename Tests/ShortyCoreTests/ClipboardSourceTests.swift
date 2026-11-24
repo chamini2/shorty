@@ -32,7 +32,7 @@ final class ClipboardSourceTests: XCTestCase {
             window(owner: "Slack", pid: 40, layer: 0),
         ]
 
-        XCTAssertEqual(ClipboardSource.attributableOwnerPID(from: windows, excluding: 99), 20)
+        XCTAssertEqual(ClipboardSource.attributableOwnerPID(from: windows), 20)
     }
 
     func testOrdinaryWindowWins() {
@@ -41,16 +41,18 @@ final class ClipboardSourceTests: XCTestCase {
             window(owner: "Finder", pid: 50, layer: 0),
         ]
 
-        XCTAssertEqual(ClipboardSource.attributableOwnerPID(from: windows, excluding: 99), 40)
+        XCTAssertEqual(ClipboardSource.attributableOwnerPID(from: windows), 40)
     }
 
-    func testSkipsShortysOwnWindows() {
+    func testShortysOwnWindowCountsAsTheSource() {
         let windows = [
             window(owner: "Shorty", pid: 99, layer: 25),
             window(owner: "Slack", pid: 40, layer: 0),
         ]
 
-        XCTAssertEqual(ClipboardSource.attributableOwnerPID(from: windows, excluding: 99), 40)
+        // Copying out of Shorty's search box came from Shorty, not from
+        // whatever sits behind the panel.
+        XCTAssertEqual(ClipboardSource.attributableOwnerPID(from: windows), 99)
     }
 
     func testSkipsSystemUIAndInvisibleWindows() {
@@ -61,7 +63,7 @@ final class ClipboardSourceTests: XCTestCase {
             window(owner: "Slack", pid: 40, layer: 0),
         ]
 
-        XCTAssertEqual(ClipboardSource.attributableOwnerPID(from: windows, excluding: 99), 40)
+        XCTAssertEqual(ClipboardSource.attributableOwnerPID(from: windows), 40)
     }
 
     func testNoCandidateFallsBackToNil() {
@@ -70,6 +72,6 @@ final class ClipboardSourceTests: XCTestCase {
             window(owner: "Control Center", pid: 30, layer: 25, width: 29, height: 30),
         ]
 
-        XCTAssertNil(ClipboardSource.attributableOwnerPID(from: windows, excluding: 99))
+        XCTAssertNil(ClipboardSource.attributableOwnerPID(from: windows))
     }
 }

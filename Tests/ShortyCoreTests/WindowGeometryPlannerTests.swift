@@ -3,6 +3,104 @@ import XCTest
 @testable import ShortyCore
 
 final class WindowGeometryPlannerTests: XCTestCase {
+    private let oneScreen = CGRect(x: 0, y: 39, width: 2056, height: 1290)
+
+    func testResizeStepsByAShareOfTheDisplayAroundTheCentre() throws {
+        let window = CGRect(x: 600, y: 400, width: 900, height: 600)
+
+        let larger = try XCTUnwrap(
+            WindowGeometryPlanner.resizedFrame(for: window, screens: [oneScreen], by: 0.05)
+        )
+        XCTAssertEqual(larger.width, 900 + oneScreen.width * 0.05, accuracy: 1)
+        XCTAssertEqual(larger.midX, window.midX, accuracy: 1)
+        XCTAssertEqual(larger.midY, window.midY, accuracy: 1)
+
+        let smaller = try XCTUnwrap(
+            WindowGeometryPlanner.resizedFrame(for: window, screens: [oneScreen], by: -0.05)
+        )
+        XCTAssertEqual(smaller.width, 900 - oneScreen.width * 0.05, accuracy: 1)
+    }
+
+    func testResizeStopsAtTheDisplayAndAtAUsableMinimum() {
+        var grown = CGRect(x: 600, y: 400, width: 900, height: 600)
+        while let next = WindowGeometryPlanner.resizedFrame(for: grown, screens: [oneScreen], by: 0.05) {
+            grown = next
+        }
+
+        XCTAssertEqual(grown, oneScreen, "fills the display and goes no further")
+        XCTAssertNil(WindowGeometryPlanner.resizedFrame(for: grown, screens: [oneScreen], by: 0.05))
+
+        var shrunk = CGRect(x: 600, y: 400, width: 900, height: 600)
+        while let next = WindowGeometryPlanner.resizedFrame(for: shrunk, screens: [oneScreen], by: -0.05) {
+            shrunk = next
+        }
+
+        XCTAssertGreaterThanOrEqual(shrunk.width, oneScreen.width * 0.2 - 1)
+        XCTAssertNil(WindowGeometryPlanner.resizedFrame(for: shrunk, screens: [oneScreen], by: -0.05))
+    }
+
+    func testGrowingNearAnEdgePullsTheWindowBackOnScreen() throws {
+        let edge = CGRect(x: oneScreen.maxX - 500, y: oneScreen.minY + 10, width: 480, height: 300)
+
+        let grown = try XCTUnwrap(
+            WindowGeometryPlanner.resizedFrame(for: edge, screens: [oneScreen], by: 0.05)
+        )
+        XCTAssertTrue(oneScreen.contains(grown))
+    }
+
+    func testMonitorMoveNeedsASecondDisplay() {
+        let screen = CGRect(x: 0, y: 39, width: 2056, height: 1290)
+        let window = CGRect(x: 172, y: 132, width: 1728, height: 1071)
+
+        XCTAssertNil(WindowGeometryPlanner.monitorMoveFrame(for: window, screens: [screen], direction: .left))
+        XCTAssertNil(WindowGeometryPlanner.monitorMoveFrame(for: window, screens: [screen], direction: .right))
+    }
+
+    func testMonitorMoveScalesIntoTheOtherDisplayAndBack() throws {
+        let screens = [
+            CGRect(x: 0, y: 39, width: 2056, height: 1290),
+            CGRect(x: 2056, y: 0, width: 1920, height: 1080),
+        ]
+        let window = CGRect(x: 400, y: 300, width: 900, height: 700)
+
+        let moved = try XCTUnwrap(
+            WindowGeometryPlanner.monitorMoveFrame(for: window, screens: screens, direction: .right)
+        )
+        XCTAssertTrue(screens[1].contains(moved), "lands inside the other display")
+        XCTAssertLessThan(moved.width, window.width, "scaled to the smaller display")
+
+        let returned = try XCTUnwrap(
+            WindowGeometryPlanner.monitorMoveFrame(for: moved, screens: screens, direction: .left)
+        )
+        XCTAssertTrue(WindowGeometryPlanner.isApproximately(returned, window), "comes back where it was")
+    }
+
+    func testHalfCycleWrapsWithinOneDisplay() throws {
+        let screen = CGRect(x: 0, y: 39, width: 2056, height: 1290)
+        let window = CGRect(x: 172, y: 132, width: 1728, height: 1071)
+
+        let left = try XCTUnwrap(
+            WindowGeometryPlanner.halfCycleFrame(for: window, screens: [screen], direction: .left)
+        )
+        XCTAssertEqual(left, CGRect(x: 0, y: 39, width: 1028, height: 1290))
+
+        // With nowhere else to go, pressing left again swaps to the other half.
+        let again = try XCTUnwrap(
+            WindowGeometryPlanner.halfCycleFrame(for: left, screens: [screen], direction: .left)
+        )
+        XCTAssertEqual(again, CGRect(x: 1028, y: 39, width: 1028, height: 1290))
+    }
+
+    func testSizeComparisonToleratesSmallDifferences() {
+        let target = CGSize(width: 2056, height: 1290)
+
+        XCTAssertTrue(WindowGeometryPlanner.isApproximately(CGSize(width: 2056, height: 1290), target))
+        XCTAssertTrue(WindowGeometryPlanner.isApproximately(CGSize(width: 2055, height: 1291), target))
+
+        // A window that kept its own size is not approximately the target.
+        XCTAssertFalse(WindowGeometryPlanner.isApproximately(CGSize(width: 1728, height: 1071), target))
+    }
+
     func testHalfFramesUseVisibleScreenHalves() {
         let screen = CGRect(x: 100, y: 50, width: 1000, height: 800)
 
@@ -144,6 +242,34 @@ final class WindowGeometryPlannerTests: XCTestCase {
         let screen = CGRect(x: 100, y: 50, width: 1000, height: 800)
 
         XCTAssertEqual(WindowGeometryPlanner.maximizeFrame(on: screen), screen)
+    }
+
+    func testAlmostMaximizeLeavesAnEvenMarginOnTheCurrentScreen() {
+        let screen = CGRect(x: 100, y: 50, width: 1000, height: 800)
+        let frame = WindowGeometryPlanner.almostMaximizeFrame(on: screen)
+
+        XCTAssertEqual(frame, CGRect(x: 150, y: 90, width: 900, height: 720))
+        XCTAssertEqual(frame.minX - screen.minX, screen.maxX - frame.maxX)
+        XCTAssertEqual(frame.minY - screen.minY, screen.maxY - frame.maxY)
+    }
+
+    func testAlmostMaximizeStaysOnTheDisplayItWasGiven() {
+        // A second display sits at an offset, so the margin cannot be
+        // measured from the origin.
+        let screen = CGRect(x: 1512, y: -180, width: 2560, height: 1440)
+        let frame = WindowGeometryPlanner.almostMaximizeFrame(on: screen)
+
+        XCTAssertTrue(screen.contains(frame))
+        XCTAssertEqual(frame.midX, screen.midX)
+        XCTAssertEqual(frame.midY, screen.midY)
+    }
+
+    func testAlmostMaximizeDoesNotCreepWhenRepeated() {
+        let screen = CGRect(x: 0, y: 25, width: 1512, height: 945)
+        let once = WindowGeometryPlanner.almostMaximizeFrame(on: screen)
+
+        XCTAssertEqual(WindowGeometryPlanner.almostMaximizeFrame(on: screen), once)
+        XCTAssertEqual(once.width, (screen.width * 0.9).rounded())
     }
 
     func testAccessibilityFrameConvertsAppKitVisibleFrameToTopLeftCoordinates() {

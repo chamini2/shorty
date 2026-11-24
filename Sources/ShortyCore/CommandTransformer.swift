@@ -379,7 +379,9 @@ public enum CommandTransformerEngine {
         return String(format: "UTC%@%d:%02d", sign, minutes / 60, remainder)
     }
 
-    private static func wallClock(_ date: Date, in timeZone: TimeZone) -> String {
+    /// The clock face alone, without the offset that `currentTime` appends:
+    /// a row showing the offset underneath does not need it twice.
+    public static func wallClock(_ date: Date, in timeZone: TimeZone) -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")

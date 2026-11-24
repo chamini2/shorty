@@ -14,10 +14,22 @@ public final class ShortyController {
     public var commandBoxSettingsHandler: ((CommandBoxSettings) -> Void)?
     public var windowSwitcherHandler: ((WindowSwitcherUpdate) -> Void)?
     public var permissionRequestHandler: ((ShortyPermissionPane) -> Void)?
+    /// Every copy as it lands, for work that is better started early.
+    public var clipboardCaptureHandler: ((ClipboardItem) -> Void)? {
+        get { clipboardMonitor.didCapture }
+        set { clipboardMonitor.didCapture = newValue }
+    }
+    /// Every combo Shorty answers to, built-in and configured alike.
+    public var boundHotKeys: [KeyCombo] {
+        loadedBindings.boundActions.map(\.hotKey)
+            + loadedShortcuts.flatMap { [$0.hotKey] + $0.aliasHotKeys }
+    }
+
     public private(set) var loadedShortcuts: [LoadedShortcut] = []
     public private(set) var loadedSnippetGroups: [SnippetGroup] = []
     public private(set) var loadedBindings: HotKeyBindings = .default
     public private(set) var loadedCommandBox: CommandBoxSettings = .default
+    public private(set) var loadedClipboardSettings: ClipboardSettings = .default
     private var numpadAliases = NumpadAliasResolver(claimedHotKeys: [])
 
     private let console: Console
@@ -99,15 +111,17 @@ public final class ShortyController {
             loadedBindings = configuration.bindings
             numpadAliases = configuration.numpadAliases
             loadedCommandBox = configuration.commandBox
+            loadedClipboardSettings = configuration.clipboard
+            clipboardHistoryStore.setMaximumItems(configuration.clipboard.historyLimit)
             commandBoxSettingsHandler?(loadedCommandBox)
             if didCompleteStart, loadedBindings != previousBindings {
                 applyBindings(changedFrom: previousBindings)
             }
 
             let snippetCount = configuration.snippetGroups.reduce(0) { $0 + $1.snippets.count }
-            let message = "Loaded \(configuration.shortcuts.count) shortcut(s) and \(snippetCount) snippet(s) from \(options.configURL.path)."
-            console.info("\(message) Reason: \(reason).")
-            publishStatus(message)
+            let summary = "Loaded \(configuration.shortcuts.count) shortcut(s) and \(snippetCount) snippet(s)."
+            console.info("\(summary) From \(options.configURL.path). Reason: \(reason).")
+            publishStatus(summary)
         } catch {
             let snippetCount = loadedSnippetGroups.reduce(0) { $0 + $1.snippets.count }
             let fallback = loadedShortcuts.isEmpty && snippetCount == 0
@@ -223,6 +237,7 @@ public final class ShortyController {
             (loadedBindings.moveWindowLeftHalf, .cycleHalf(.left)),
             (loadedBindings.moveWindowRightHalf, .cycleHalf(.right)),
             (loadedBindings.maximizeWindow, .maximize),
+            (loadedBindings.almostMaximizeWindow, .almostMaximize),
             (loadedBindings.moveWindowToLeftMonitor, .moveToMonitor(.left)),
             (loadedBindings.moveWindowToRightMonitor, .moveToMonitor(.right)),
         ]
@@ -325,6 +340,12 @@ public final class ShortyController {
     }
 
     /// Window moves from somewhere other than a hotkey, such as the command box.
+    /// Logged so a command that appears to do nothing can be told apart from
+    /// one that never ran.
+    public func noteCommandBoxAction(_ description: String) {
+        console.info("Command box ran \(description).")
+    }
+
     public func performWindowMove(_ command: WindowMoveCommand) {
         moveFocusedWindow(command, hotKey: "command box")
     }

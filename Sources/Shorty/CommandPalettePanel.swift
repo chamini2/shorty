@@ -23,15 +23,23 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     private let header = ShortyBoxHeaderView()
     private var searchField: ShortyBoxSearchField { header.searchField }
     private let stackView = NSStackView()
-    private let scrollView = NSScrollView()
+    private let scrollView = ShortyScrollView()
     private let listContainer = CommandPaletteListContainerView()
+    /// Behind the rows, for lists whose entries are places: the time zones.
+    private let mapView = WorldMapView(frame: .zero)
     private var entries: [CommandEntry] = []
+    private let icons = AppIconLoader()
+    private var iconRefreshScheduled = false
     private var rowHeights: [CGFloat] = []
     private var selectedIndex = 0
     /// Set when this list shows a destination's entries rather than the root.
     private let listEntries: [CommandEntry]?
     private let listTitle: String?
     private let listSymbolName: String?
+    /// Set when the rows come from a search rather than from a fixed list.
+    private let search: CommandSearchKind?
+    private let fileSearcher = FileSearcher()
+    private let recentFiles = RecentFileStore()
     private var isPresentingNestedPicker = false
     private var pendingInsertionRange: NSRange?
     private var selectionRangeAfterRefocus: NSRange?
@@ -43,6 +51,9 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     /// Only the entry count is shown; the picker does the browsing.
     var history: [ClipboardItem] = []
     var keepAwake = false
+    /// The apps installed on the machine, supplied by the app so the scan is
+    /// shared and kept between openings.
+    var applications: [InstalledApplication] = []
 
     convenience init(box: ShortyBoxController) {
         self.init(box: box, listEntries: nil, title: nil, symbolName: nil)
@@ -52,13 +63,19 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         box: ShortyBoxController,
         listEntries: [CommandEntry]?,
         title: String?,
-        symbolName: String?
+        symbolName: String?,
+        search: CommandSearchKind? = nil
     ) {
         self.box = box
         self.listEntries = listEntries
         self.listTitle = title
         self.listSymbolName = symbolName
+        self.search = search
         super.init()
+
+        icons.didLoad = { [weak self] in
+            self?.scheduleIconRefresh()
+        }
 
         configureContent()
         configureSearchField()
@@ -86,14 +103,30 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         handlePanelKeyEvent(event)
     }
 
-    func show() {
+    /// Escape clears what you typed first, and only then goes back a level.
+    func boxHandlesEscape() -> Bool {
+        guard !searchField.stringValue.isEmpty else {
+            return false
+        }
+
         searchField.stringValue = ""
+        updateResults()
+        return true
+    }
+
+    func show() {
+        // Opens with the last thing you ran, selected, so the same command can
+        // be repeated with the hotkey and return alone. Typing replaces it,
+        // since the text comes up selected.
+        searchField.stringValue = lastRunQuery
+        selectedEntryIDBeforePush = lastRunEntryID
         selectionRangeAfterRefocus = nil
         updateHeader()
         updateResults()
         resizePanel()
 
         box.open(self)
+        searchField.currentEditor()?.selectAll(nil)
     }
 
 
@@ -166,23 +199,32 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         stackView.translatesAutoresizingMaskIntoConstraints = false
         listContainer.translatesAutoresizingMaskIntoConstraints = false
+        mapView.translatesAutoresizingMaskIntoConstraints = false
+        mapView.isHidden = true
 
         // The panel no longer grows with its rows, so the list scrolls.
         scrollView.documentView = listContainer
         scrollView.drawsBackground = false
-        scrollView.hasVerticalScroller = true
+
         scrollView.autohidesScrollers = true
         scrollView.horizontalScrollElasticity = .none
         scrollView.borderType = .noBorder
         listContainer.addSubview(stackView)
 
         container.addSubview(header)
+        // Added first, so the rows draw over it.
+        container.addSubview(mapView)
         container.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.topPadding),
             header.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+
+            mapView.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            mapView.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
+            mapView.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+            mapView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
 
             scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Metrics.resultTopSpacing),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.horizontalPadding),
@@ -240,6 +282,19 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     private func updateResults(resetSelection: Bool = true) {
         let query = searchField.stringValue
 
+        switch search {
+        case .files:
+            searchFiles(query: query)
+            return
+        case .timeZones:
+            // Local work, so the answer is ready in the same breath as the
+            // keystroke and there is nothing to wait for.
+            show(entries: CommandCatalog.timeZoneEntries(query: query, settings: settings))
+            return
+        case nil:
+            break
+        }
+
         if let listEntries {
             entries = CommandCatalog.entries(in: listEntries, query: query)
         } else {
@@ -247,12 +302,14 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
                 query: query,
                 settings: settings,
                 history: history,
-                keepAwake: keepAwake
+                keepAwake: keepAwake,
+                screenCount: NSScreen.screens.count,
+                applications: applications
             )
         }
 
         if resetSelection || !entries.indices.contains(selectedIndex) {
-            selectedIndex = 0
+            selectedIndex = openingSelectionIndex(query: query)
         }
 
         rowHeights = entries.map {
@@ -263,19 +320,134 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         resizePanel()
     }
 
+    /// Spotlight answers in its own time, so the rows that are already on
+    /// screen stay until it does: emptying the list on every keystroke would
+    /// make the box flicker through a search.
+    private func searchFiles(query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmed.isEmpty else {
+            showRecentFiles()
+            return
+        }
+
+        if trimmed.count < FileSearcher.minimumQueryLength {
+            fileSearcher.cancel()
+            show(entries: [CommandEntry(id: "files.hint", title: "Keep typing…")])
+            return
+        }
+
+        fileSearcher.search(trimmed) { [weak self] hits in
+            guard let self, searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else {
+                return
+            }
+
+            show(entries: hits.isEmpty
+                ? [CommandEntry(id: "files.none", title: "No files match \(trimmed)")]
+                : CommandCatalog.fileEntries(hits))
+        }
+    }
+
+    /// With nothing typed, what you opened through Shorty, then what the
+    /// machine opened last. Yours lead: a short list of things you came to
+    /// this box for beats everything the Mac has touched.
+    private func showRecentFiles() {
+        let own = recentFiles.recent().map(FileHit.init(path:))
+        show(entries: CommandCatalog.fileEntries(own))
+
+        fileSearcher.recentlyOpened { [weak self] hits in
+            guard let self, searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
+            }
+
+            let ownPaths = Set(own.map(\.path))
+            let combined = own + hits.filter { !ownPaths.contains($0.path) }
+
+            show(entries: combined.isEmpty
+                ? [CommandEntry(id: "files.hint", title: "Type to search your files")]
+                : CommandCatalog.fileEntries(Array(combined.prefix(FileSearcher.resultLimit))))
+        }
+    }
+
+    private func show(entries newEntries: [CommandEntry]) {
+        entries = newEntries
+        selectedIndex = entries.firstIndex(where: \.opensSelected)
+            ?? (entries.first?.action == nil && entries.first?.destination == nil ? -1 : 0)
+        rowHeights = entries.map {
+            CommandPaletteEntryRowView.height(for: $0, width: Metrics.panelWidth - Metrics.horizontalPadding * 2)
+        }
+
+        renderRows()
+        resizePanel()
+    }
+
+    /// A list can name the row it opens on, as Time does with the local zone.
+    /// Typing overrides it: then the best match is what you asked for.
+    private func openingSelectionIndex(query: String) -> Int {
+        guard query.isEmpty, let index = entries.firstIndex(where: \.opensSelected) else {
+            return 0
+        }
+
+        return index
+    }
+
+    /// Only a list made of places gets the map: the root, with its mix of
+    /// commands, does not.
+    /// Read from the rows on screen rather than from a fixed list: the zones
+    /// are searched now, so there is no list to ask until something is shown.
+    private var showsMap: Bool {
+        entries.contains { $0.marker != nil }
+    }
+
+    private func updateMap() {
+        mapView.isHidden = !showsMap
+
+        guard showsMap else {
+            return
+        }
+
+        mapView.show(
+            entries.compactMap(\.marker),
+            selected: entries.indices.contains(selectedIndex) ? entries[selectedIndex].marker : nil
+        )
+    }
+
+    /// Icons arrive after the rows are already on screen. Redrawing is
+    /// coalesced, so two hundred arrivals cost one pass, not two hundred.
+    private func scheduleIconRefresh() {
+        guard !iconRefreshScheduled else {
+            return
+        }
+
+        iconRefreshScheduled = true
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                return
+            }
+
+            iconRefreshScheduled = false
+            renderRows()
+        }
+    }
+
     private func renderRows() {
+        updateMap()
+
         for view in stackView.arrangedSubviews {
             stackView.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
 
         let detailColumnWidth = CommandPaletteEntryRowView.detailColumnWidth(for: entries)
+        icons.prepare(entries.compactMap(\.iconPath))
 
         for (index, pair) in zip(entries, rowHeights).enumerated() {
             let row = CommandPaletteEntryRowView(
                 entry: pair.0,
                 isSelected: index == selectedIndex,
-                detailColumnWidth: detailColumnWidth
+                detailColumnWidth: detailColumnWidth,
+                icon: pair.0.iconPath.flatMap { icons.icon(at: $0) }
             )
             row.translatesAutoresizingMaskIntoConstraints = false
             stackView.addArrangedSubview(row)
@@ -299,6 +471,35 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     }
 
     /// Runs the selected entry, or opens it when it is a group.
+    /// A file row does three things depending on what is held: open it,
+    /// show it in Finder, or take its path. Everything else ignores the
+    /// modifiers.
+    private static func modified(_ action: CommandAction) -> CommandAction {
+        let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        // Shift on a cascade parks the window you are in: whichever window
+        // that is, the rest stack up behind it.
+        if case let .moveWindow(.cascade(options)) = action, flags.contains(.shift) {
+            return .moveWindow(
+                .cascade(WindowCascadeOptions(scope: options.scope, keepsFocused: true))
+            )
+        }
+
+        guard case let .openFile(path) = action else {
+            return action
+        }
+
+        if flags.contains(.command) {
+            return .revealFile(path: path)
+        }
+
+        if flags.contains(.option) {
+            return .copyFilePath(path: path)
+        }
+
+        return action
+    }
+
     private func activateSelection() {
         guard entries.indices.contains(selectedIndex) else {
             NSSound.beep()
@@ -310,6 +511,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         if let destination = entry.destination {
             // Coming back should land here, not at the top of the list.
             selectedEntryIDBeforePush = entry.id
+            rememberForNextTime(entry)
             open(destination, from: entry)
             return
         }
@@ -319,13 +521,23 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             return
         }
 
+        rememberForNextTime(entry)
         hide()
-        actionHandler?(action)
+        actionHandler?(Self.modified(action))
     }
 
     /// Remembers what was selected while a child list is open, so coming back
     /// lands on the entry you left from rather than the top of the list.
     private var selectedEntryIDBeforePush: String?
+    /// What was run last, to offer again next time the box opens. Held by the
+    /// root list, which is the one `show()` presents.
+    private var lastRunQuery = ""
+    private var lastRunEntryID: String?
+
+    private func rememberForNextTime(_ entry: CommandEntry) {
+        lastRunQuery = searchField.stringValue
+        lastRunEntryID = entry.id
+    }
 
     private func restoreSelectionAfterReturn() {
         guard let id = selectedEntryIDBeforePush else {
@@ -357,6 +569,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             )
             list.settings = settings
             list.history = history
+            list.applications = applications
             list.actionHandler = actionHandler
             list.pickerRequestHandler = pickerRequestHandler
             list.viewProvider = viewProvider
@@ -369,6 +582,22 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             }
 
             box.push(content)
+
+        case let .search(kind):
+            let list = CommandPalettePanelController(
+                box: box,
+                listEntries: [],
+                title: entry.title,
+                symbolName: Self.symbolName(for: entry),
+                search: kind
+            )
+            list.settings = settings
+            list.history = history
+            list.applications = applications
+            list.actionHandler = actionHandler
+            list.pickerRequestHandler = pickerRequestHandler
+            list.viewProvider = viewProvider
+            box.push(list)
         }
     }
 
@@ -587,7 +816,24 @@ private final class CommandPaletteEntryRowView: NSView {
         static let lineHeight: CGFloat = 18
         static let singleLineHeight: CGFloat = 26
         static let cornerRadius: CGFloat = 6
+        static let iconSize: CGFloat = 16
+        static let iconSpacing: CGFloat = 7
+        /// A detailed row: two lines of text beside a larger icon.
+        static let detailedIconSize: CGFloat = 30
+        static let detailedHeight: CGFloat = 46
+        static let detailedTitleSpacing: CGFloat = 2
+        static let detailedPathFontSize: CGFloat = 11
+        /// Room for the scroller, which floats over the rows rather than
+        /// taking space of its own: without it the clock loses its seconds.
+        static let scrollerAllowance: CGFloat = 12
+        /// A worked answer gets a row of its own shape.
+        static let resultHeight: CGFloat = 64
+        static let resultValueFontSize: CGFloat = 20
+        static let resultPadding: CGFloat = 16
+        static let resultNoteSpacing: CGFloat = 3
     }
+
+
 
     /// Widest single-line detail in the list, so every row reserves the same
     /// column and the parts that vary, such as a UTC offset, line up.
@@ -603,7 +849,7 @@ private final class CommandPaletteEntryRowView: NSView {
         return widths.max() ?? 0
     }
 
-    init(entry: CommandEntry, isSelected: Bool, detailColumnWidth: CGFloat = 0) {
+    init(entry: CommandEntry, isSelected: Bool, detailColumnWidth: CGFloat = 0, icon: NSImage? = nil) {
         super.init(frame: .zero)
 
         wantsLayer = true
@@ -612,6 +858,17 @@ private final class CommandPaletteEntryRowView: NSView {
             ? NSColor(calibratedWhite: 1, alpha: 0.12).cgColor
             : NSColor.clear.cgColor
 
+        switch entry.layout {
+        case .detailed:
+            configureDetailed(entry: entry, isSelected: isSelected, icon: icon)
+            return
+        case .result:
+            configureResult(entry: entry, isSelected: isSelected)
+            return
+        case .compact:
+            break
+        }
+
         let titleField = NSTextField(labelWithString: entry.navigates ? "\(entry.title) ›" : entry.title)
         titleField.font = Self.titleFont
         titleField.textColor = isSelected ? .labelColor : .secondaryLabelColor
@@ -619,8 +876,30 @@ private final class CommandPaletteEntryRowView: NSView {
         titleField.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleField)
 
+        // An icon shifts the text across; rows without one read as before.
+        var textLeading = leadingAnchor
+        var textInset = Metrics.horizontalPadding
+
+        if entry.iconPath != nil || entry.symbolName != nil {
+            let iconView = NSImageView()
+            iconView.image = icon
+            iconView.imageScaling = .scaleProportionallyUpOrDown
+            iconView.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(iconView)
+
+            NSLayoutConstraint.activate([
+                iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
+                iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+                iconView.widthAnchor.constraint(equalToConstant: Metrics.iconSize),
+                iconView.heightAnchor.constraint(equalToConstant: Metrics.iconSize),
+            ])
+
+            textLeading = iconView.trailingAnchor
+            textInset = Metrics.iconSpacing
+        }
+
         NSLayoutConstraint.activate([
-            titleField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
+            titleField.leadingAnchor.constraint(equalTo: textLeading, constant: textInset),
         ])
 
         guard let detail = entry.detail, !detail.isEmpty else {
@@ -670,11 +949,185 @@ private final class CommandPaletteEntryRowView: NSView {
         ])
     }
 
+    private static func symbol(_ name: String) -> NSImage? {
+        NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(
+                NSImage.SymbolConfiguration(pointSize: Metrics.detailedIconSize - 6, weight: .regular)
+            )
+    }
+
+    /// What was asked on the left, what it comes to on the right, each with
+    /// its note beneath. A worked answer reads as a sum rather than as a row
+    /// in a list, so it is given the room to look like one.
+    private func configureResult(entry: CommandEntry, isSelected: Bool) {
+        let question = Self.resultColumn(
+            value: entry.title,
+            note: entry.detail,
+            alignment: .left,
+            isSelected: isSelected
+        )
+        let answer = Self.resultColumn(
+            value: entry.trailing ?? "",
+            note: entry.trailingDetail,
+            alignment: .right,
+            isSelected: isSelected
+        )
+        let arrow = NSTextField(labelWithString: "→")
+        arrow.font = .systemFont(ofSize: Metrics.resultValueFontSize, weight: .light)
+        arrow.textColor = .tertiaryLabelColor
+        arrow.translatesAutoresizingMaskIntoConstraints = false
+
+        for view in [question, arrow, answer] {
+            addSubview(view)
+        }
+
+        NSLayoutConstraint.activate([
+            question.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.resultPadding),
+            question.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            arrow.centerXAnchor.constraint(equalTo: centerXAnchor),
+            arrow.centerYAnchor.constraint(equalTo: centerYAnchor),
+            arrow.leadingAnchor.constraint(
+                greaterThanOrEqualTo: question.trailingAnchor,
+                constant: Metrics.detailSpacing
+            ),
+
+            answer.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -(Metrics.resultPadding + Metrics.scrollerAllowance)
+            ),
+            answer.centerYAnchor.constraint(equalTo: centerYAnchor),
+            answer.leadingAnchor.constraint(
+                greaterThanOrEqualTo: arrow.trailingAnchor,
+                constant: Metrics.detailSpacing
+            ),
+        ])
+    }
+
+    private static func resultColumn(
+        value: String,
+        note: String?,
+        alignment: NSTextAlignment,
+        isSelected: Bool
+    ) -> NSStackView {
+        let valueField = NSTextField(labelWithString: value)
+        valueField.font = .systemFont(ofSize: Metrics.resultValueFontSize, weight: .semibold)
+        valueField.textColor = isSelected ? .labelColor : .secondaryLabelColor
+        valueField.alignment = alignment
+        valueField.lineBreakMode = .byTruncatingTail
+
+        let column = NSStackView(views: [valueField])
+        column.orientation = .vertical
+        column.alignment = alignment == .right ? .trailing : .leading
+        column.spacing = Metrics.resultNoteSpacing
+        column.translatesAutoresizingMaskIntoConstraints = false
+
+        if let note, !note.isEmpty {
+            let noteField = NSTextField(labelWithString: note)
+            noteField.font = .systemFont(ofSize: Metrics.detailFontSize)
+            noteField.textColor = .tertiaryLabelColor
+            noteField.alignment = alignment
+            noteField.lineBreakMode = .byTruncatingTail
+            column.addArrangedSubview(noteField)
+        }
+
+        return column
+    }
+
+    /// Name on top, where it is read first, and the path under it in full.
+    /// Half a search for `README` comes back with the same name every time,
+    /// so the path is the part that decides.
+    private func configureDetailed(entry: CommandEntry, isSelected: Bool, icon: NSImage?) {
+        // A row with no picture of its own gives the space back to the text
+        // rather than leaving a hole where an icon would be.
+        let picture = icon ?? entry.symbolName.flatMap(Self.symbol)
+        var textLeading = leadingAnchor
+        var textInset = Metrics.horizontalPadding
+
+        if let picture {
+            let iconView = NSImageView()
+            iconView.image = picture
+            iconView.contentTintColor = icon == nil ? .secondaryLabelColor : nil
+            iconView.imageScaling = .scaleProportionallyUpOrDown
+            iconView.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(iconView)
+
+            NSLayoutConstraint.activate([
+                iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
+                iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+                iconView.widthAnchor.constraint(equalToConstant: Metrics.detailedIconSize),
+                iconView.heightAnchor.constraint(equalToConstant: Metrics.detailedIconSize),
+            ])
+
+            textLeading = iconView.trailingAnchor
+            textInset = Metrics.iconSpacing
+        }
+
+        let titleField = NSTextField(labelWithString: entry.title)
+        titleField.font = .systemFont(ofSize: Metrics.titleFontSize, weight: .medium)
+        titleField.textColor = isSelected ? .labelColor : .secondaryLabelColor
+        titleField.lineBreakMode = .byTruncatingTail
+        titleField.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(titleField)
+
+        if let trailing = entry.trailing {
+            let valueField = NSTextField(labelWithString: trailing)
+            valueField.font = Self.detailFont
+            valueField.textColor = .secondaryLabelColor
+            valueField.lineBreakMode = .byTruncatingTail
+            valueField.translatesAutoresizingMaskIntoConstraints = false
+            valueField.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+            addSubview(valueField)
+
+            NSLayoutConstraint.activate([
+                valueField.trailingAnchor.constraint(
+                    equalTo: trailingAnchor,
+                    constant: -(Metrics.horizontalPadding + Metrics.scrollerAllowance)
+                ),
+                valueField.firstBaselineAnchor.constraint(equalTo: titleField.firstBaselineAnchor),
+                valueField.leadingAnchor.constraint(
+                    greaterThanOrEqualTo: titleField.trailingAnchor,
+                    constant: Metrics.detailSpacing
+                ),
+            ])
+        }
+
+        let pathField = NSTextField(labelWithString: entry.detail ?? "")
+        pathField.font = .systemFont(ofSize: Metrics.detailedPathFontSize)
+        pathField.textColor = .tertiaryLabelColor
+        // The end of a path says more than its start, so that is what stays.
+        pathField.lineBreakMode = .byTruncatingHead
+        pathField.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(pathField)
+
+        NSLayoutConstraint.activate([
+            titleField.leadingAnchor.constraint(equalTo: textLeading, constant: textInset),
+            titleField.trailingAnchor.constraint(
+                lessThanOrEqualTo: trailingAnchor,
+                constant: -Metrics.horizontalPadding
+            ),
+            titleField.bottomAnchor.constraint(equalTo: centerYAnchor, constant: -Metrics.detailedTitleSpacing / 2),
+
+            pathField.leadingAnchor.constraint(equalTo: titleField.leadingAnchor),
+            pathField.trailingAnchor.constraint(equalTo: titleField.trailingAnchor),
+            pathField.topAnchor.constraint(equalTo: centerYAnchor, constant: Metrics.detailedTitleSpacing / 2),
+        ])
+    }
+
     required init?(coder: NSCoder) {
         nil
     }
 
     static func height(for entry: CommandEntry, width: CGFloat) -> CGFloat {
+        switch entry.layout {
+        case .detailed:
+            return Metrics.detailedHeight
+        case .result:
+            return Metrics.resultHeight
+        case .compact:
+            break
+        }
+
         guard let detail = entry.detail, isMultiline(detail) else {
             return Metrics.singleLineHeight
         }
