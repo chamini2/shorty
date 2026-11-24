@@ -339,9 +339,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showCommandPalette() {
-        // The same hotkey closes it again.
-        if commandPalettePanel.isPresented {
-            commandPalettePanel.hide()
+        // The same hotkey closes the box, whatever it happens to be showing.
+        // Asking the command box whether it is presented was not the same
+        // question: with the picker on top it answered no, and the key opened
+        // the command box over it rather than putting the box away.
+        if box.isVisible {
+            box.close()
             return
         }
 
