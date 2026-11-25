@@ -436,3 +436,8 @@ The menu shows status, config path, and loaded shortcuts, plus `Keep the Mac
 Awake`, `Show Windows`, `Reload Config`, `Reveal Config`, `Open Accessibility
 Settings`, and `Quit`. Long lines are shortened in the middle so one path
 cannot stretch the menu; hover for the full text.
+
+The app icon is the same cup, full and steaming, in white on a charcoal tile.
+Both come from `Sources/Shorty/CupGlyph.swift`: `build-app.sh` runs
+`Packaging/make-icon.sh`, which draws the icon from it, so a change to the cup
+shows in both on the next build.

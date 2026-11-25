@@ -29,6 +29,7 @@ fi
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 cp "${SHORTY_BIN}" "${MACOS_DIR}/Shorty"
 cp "${SCRIPT_DIR}/Packaging/Shorty-Info.plist" "${CONTENTS_DIR}/Info.plist"
+"${SCRIPT_DIR}/Packaging/make-icon.sh" "${RESOURCES_DIR}/Shorty.icns"
 
 # A stable signing identity keeps the app's designated requirement the same
 # across rebuilds, so macOS does not drop Accessibility approval on reinstall.

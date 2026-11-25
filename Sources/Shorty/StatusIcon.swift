@@ -3,86 +3,45 @@ import AppKit
 /// The menu bar cup: empty, or full with steam rising off it, and with a
 /// warning triangle in its corner while the config fails to load.
 ///
-/// `cup.and.saucer.fill` is a solid cup with its opening knocked out, so
-/// filling that opening reads as coffee seen from above. SF Symbols has no
-/// variable value for the cup, which would otherwise give a fill level.
-///
-/// Both states are drawn on the same canvas, with the cup in the same place
-/// and room above it for the steam. Returning the bare symbol for one state
-/// and a redrawn image for the other shifted the icon by a few pixels, since
-/// rasterising loses the symbol's own alignment.
+/// The cup is `CupGlyph`, the same drawing as the app icon. Both states use
+/// the same canvas, and the glyph keeps the steam's room when empty, so the
+/// cup sits still when the state changes. That room alone left the empty cup
+/// low in the bar, so half as much again goes under it: the empty cup sits
+/// a little low and the full one a little high, rather than either by a lot.
 enum StatusIcon {
     private enum Metrics {
-        static let pointSize: CGFloat = 14
-        /// Room for the steam, and the same margin on every side so the cup
-        /// sits still when the state changes.
-        static let padding: CGFloat = 3
-        static let rayCount = 3
-        static let rayLength: CGFloat = 3
-        static let rayGap: CGFloat = 1
-        static let rayWidth: CGFloat = 1.3
-        /// How wide the steam fans out, centred on straight up.
-        static let raySpread = CGFloat.pi * 0.35
+        /// Chosen so the canvas, room underneath included, fits a 22pt bar.
+        static let glyphHeight: CGFloat = 17
+        static let padding: CGFloat = 1
+        static let bottomRoom = glyphHeight * CupGlyph.steamRoomFraction / 2
         static let badgePointSize: CGFloat = 9
         /// Clear space cut around the badge so it does not merge with the cup.
         static let badgeHalo: CGFloat = 1.2
     }
 
-    /// Where the opening sits inside the symbol, measured from the rendered
-    /// image rather than guessed, as fractions of its size.
-    private enum Opening {
-        static let minX: CGFloat = 0.271
-        static let maxX: CGFloat = 0.724
-        static let minY: CGFloat = 0.656
-        static let maxY: CGFloat = 0.863
-    }
-
-    static func cup(filled: Bool, warning: Bool = false) -> NSImage? {
-        let configuration = NSImage.SymbolConfiguration(pointSize: Metrics.pointSize, weight: .regular)
-
-        guard let cup = NSImage(
-            systemSymbolName: "cup.and.saucer.fill",
-            accessibilityDescription: accessibilityDescription(filled: filled, warning: warning)
-        )?.withSymbolConfiguration(configuration) else {
-            return nil
-        }
-
+    static func cup(filled: Bool, warning: Bool = false) -> NSImage {
+        let glyph = NSSize(width: Metrics.glyphHeight * CupGlyph.aspectRatio, height: Metrics.glyphHeight)
         let canvas = NSSize(
-            width: cup.size.width + Metrics.padding * 2,
-            height: cup.size.height + Metrics.padding * 2
-        )
-        let cupRect = NSRect(
-            x: Metrics.padding,
-            y: Metrics.padding,
-            width: cup.size.width,
-            height: cup.size.height
+            width: glyph.width + Metrics.padding * 2,
+            height: glyph.height + Metrics.bottomRoom + Metrics.padding * 2
         )
 
-        let image = NSImage(size: canvas)
-        image.lockFocus()
-        cup.draw(in: cupRect)
-
-        if filled {
-            let opening = NSRect(
-                x: cupRect.minX + cupRect.width * Opening.minX,
-                y: cupRect.minY + cupRect.height * Opening.minY,
-                width: cupRect.width * (Opening.maxX - Opening.minX),
-                height: cupRect.height * (Opening.maxY - Opening.minY)
+        // Drawn on demand, so it renders sharp at the screen's scale.
+        let image = NSImage(size: canvas, flipped: false) { _ in
+            CupGlyph.draw(
+                in: NSRect(origin: NSPoint(x: Metrics.padding, y: Metrics.padding + Metrics.bottomRoom), size: glyph),
+                filled: filled,
+                color: .black
             )
-
-            NSColor.black.setFill()
-            NSBezierPath(ovalIn: opening).fill()
-            steam(above: opening).stroke()
+            if warning {
+                drawBadge(in: canvas)
+            }
+            return true
         }
-
-        if warning {
-            drawBadge(in: canvas)
-        }
-
-        image.unlockFocus()
 
         // Template, so the menu bar tints it for light and dark alike.
         image.isTemplate = true
+        image.accessibilityDescription = accessibilityDescription(filled: filled, warning: warning)
         return image
     }
 
@@ -107,9 +66,11 @@ enum StatusIcon {
             return
         }
 
+        // Level with the saucer rather than the canvas, whose bottom is the
+        // empty room under the cup.
         let badgeRect = NSRect(
             x: canvas.width - badge.size.width,
-            y: 0,
+            y: Metrics.bottomRoom,
             width: badge.size.width,
             height: badge.size.height
         )
@@ -127,37 +88,5 @@ enum StatusIcon {
         }
 
         badge.draw(in: badgeRect)
-    }
-
-    private static func steam(above opening: NSRect) -> NSBezierPath {
-        let centre = NSPoint(x: opening.midX, y: opening.midY)
-        let radius = NSPoint(x: opening.width / 2, y: opening.height / 2)
-
-        let path = NSBezierPath()
-        path.lineWidth = Metrics.rayWidth
-        path.lineCapStyle = .round
-
-        for index in 0..<Metrics.rayCount {
-            let step = CGFloat(index) / CGFloat(max(1, Metrics.rayCount - 1))
-            let angle = .pi / 2 - Metrics.raySpread / 2 + Metrics.raySpread * step
-            let inner = Metrics.rayGap
-            let outer = Metrics.rayGap + Metrics.rayLength
-
-            path.move(
-                to: NSPoint(
-                    x: centre.x + cos(angle) * (radius.x + inner),
-                    y: centre.y + sin(angle) * (radius.y + inner)
-                )
-            )
-            path.line(
-                to: NSPoint(
-                    x: centre.x + cos(angle) * (radius.x + outer),
-                    y: centre.y + sin(angle) * (radius.y + outer)
-                )
-            )
-        }
-
-        NSColor.black.setStroke()
-        return path
     }
 }
