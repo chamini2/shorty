@@ -132,7 +132,9 @@ final class ApplicationIndexTests: XCTestCase {
         }
         let entries = CommandCatalog.rootEntries(query: "note", applications: apps)
 
-        XCTAssertEqual(entries.count, 10)
+        // Apps only: the scratch pad answers to `note` as well, and the cap
+        // is on how many apps crowd the box, not on what else matches.
+        XCTAssertEqual(entries.filter { $0.title.hasPrefix("Applications › ") }.count, 10)
     }
 
     /// Shared with the scan closure, which is `@Sendable`.

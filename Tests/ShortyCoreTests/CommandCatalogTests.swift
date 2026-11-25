@@ -21,7 +21,15 @@ final class CommandCatalogTests: XCTestCase {
 
         XCTAssertEqual(
             entries.map(\.title),
-            ["Applications", "Files", "Clipboard History", "Time", "Keep the Mac Awake", "Window"]
+            [
+                "Applications",
+                "Scratch Pad",
+                "Files",
+                "Clipboard History",
+                "Time",
+                "Keep the Mac Awake",
+                "Window",
+            ]
         )
         XCTAssertFalse(entries.contains { $0.title == "Snippets" }, "the picker already lists them")
         XCTAssertFalse(

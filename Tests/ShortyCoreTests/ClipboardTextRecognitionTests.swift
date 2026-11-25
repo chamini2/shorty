@@ -77,7 +77,14 @@ final class ClipboardTextRecognitionTests: XCTestCase {
     }
 
     func testNothingLegibleReadsAsNothing() throws {
-        let tiff = try XCTUnwrap(NSImage(size: NSSize(width: 40, height: 40)).tiffRepresentation)
+        // Drawn rather than merely sized: an image nothing has been drawn
+        // into has no representation to ask for.
+        let image = NSImage(size: NSSize(width: 40, height: 40))
+        image.lockFocus()
+        NSColor.white.drawSwatch(in: NSRect(x: 0, y: 0, width: 40, height: 40))
+        image.unlockFocus()
+
+        let tiff = try XCTUnwrap(image.tiffRepresentation)
         let representation = try XCTUnwrap(NSBitmapImageRep(data: tiff))
         let blank = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
 
