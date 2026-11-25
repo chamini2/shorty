@@ -558,48 +558,56 @@ public enum ClipboardConstants {
 }
 
 public final class ClipboardHistoryStore {
-    private let url: URL
     /// Settable, since it comes from config that is read after the store is
     /// built and can change while Shorty runs.
     private var maxStoredItems: Int
-    private let lock = NSRecursiveLock()
     private let assetStore: ClipboardAssetStore
-    private var items: [ClipboardItem]
+    private let history: ClipboardHistoryDatabase?
 
     public init(
-        url: URL = ClipboardHistoryStore.defaultURL,
+        database: ShortyDatabase? = .shared,
+        maxStoredItems: Int = ClipboardConstants.maxStoredItems,
+        assetStore: ClipboardAssetStore? = nil,
+        directory: URL? = nil
+    ) {
+        self.maxStoredItems = maxStoredItems
+        // Pictures live beside the database that references them. Left to a
+        // fixed path, a store opened on a scratch database swept the real
+        // directory, where nothing it could see was referenced: every image
+        // in the history was deleted that way.
+        let assetDirectory = database.map { $0.directory.appendingPathComponent("ClipboardAssets", isDirectory: true) }
+        self.assetStore = assetStore
+            ?? assetDirectory.map { ClipboardAssetStore(directory: $0) }
+            ?? ClipboardAssetStore()
+        history = database.map { ClipboardHistoryDatabase(database: $0) }
+
+        if let database {
+            StorageMigration.run(into: database, directory: directory)
+        }
+
+        // A crash or a hand-edited history can leave files behind.
+        self.assetStore.removeOrphans(keeping: referencedAssets(), graceSeconds: 300)
+    }
+
+    /// A store of its own, rooted beside the given history file.
+    ///
+    /// The database lives next to where the JSON did, which is what lets a
+    /// caller point the whole store at a directory of its own.
+    public convenience init(
+        url: URL,
         maxStoredItems: Int = ClipboardConstants.maxStoredItems,
         assetStore: ClipboardAssetStore = ClipboardAssetStore()
     ) {
-        self.url = url
-        self.maxStoredItems = maxStoredItems
-        self.assetStore = assetStore
-        self.items = Self.loadItems(from: url)
-        // A crash or a hand-edited history file can leave files behind.
-        assetStore.removeOrphans(keeping: self.items.compactMap(\.image), graceSeconds: 300)
+        self.init(
+            database: try? ShortyDatabase(
+                url: url.deletingLastPathComponent().appendingPathComponent("Shorty.sqlite")
+            ),
+            maxStoredItems: maxStoredItems,
+            assetStore: assetStore
+        )
     }
 
-    /// Trims at once when the limit comes down, so a smaller number in the
-    /// config takes effect rather than waiting for the next copy.
-    public func setMaximumItems(_ limit: Int) {
-        lock.lock()
-        defer { lock.unlock() }
-
-        guard limit != maxStoredItems else {
-            return
-        }
-
-        maxStoredItems = limit
-
-        guard items.count > limit else {
-            return
-        }
-
-        items = Array(items.prefix(limit))
-        assetStore.removeOrphans(keeping: items.compactMap(\.image))
-        save()
-    }
-
+    /// Where the history used to live, and where the database sits beside it.
     public static var defaultURL: URL {
         let applicationSupportURL = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
@@ -610,42 +618,47 @@ public final class ClipboardHistoryStore {
             .appendingPathComponent("ClipboardHistory.json")
     }
 
+    /// Trims at once when the limit comes down, so a smaller number in the
+    /// config takes effect rather than waiting for the next copy.
+    public func setMaximumItems(_ limit: Int) {
+        guard limit != maxStoredItems else {
+            return
+        }
+
+        maxStoredItems = limit
+        trim()
+    }
+
     public func add(_ item: ClipboardItem) {
-        lock.lock()
-        defer { lock.unlock() }
+        guard let history else {
+            return
+        }
 
         var savedItem = item
-        if let existingIndex = items.firstIndex(where: { $0.id == item.id }) {
-            savedItem.createdAt = items[existingIndex].createdAt
-            savedItem.source = savedItem.source ?? items[existingIndex].source
-            items.remove(at: existingIndex)
+
+        // A copy of something copied before keeps the date it first arrived,
+        // and the app it came from when this time around nobody owned up.
+        if let existing = try? history.existing(id: item.id) {
+            savedItem.createdAt = existing.createdAt
+            savedItem.source = savedItem.source ?? existing.source
         }
 
         savedItem.updatedAt = Date()
-        items.insert(savedItem, at: 0)
 
-        if items.count > maxStoredItems {
-            items.removeSubrange(maxStoredItems..<items.count)
-            assetStore.removeOrphans(keeping: items.compactMap(\.image))
-        }
-
-        save()
+        try? history.write(savedItem)
+        trim()
     }
 
     /// Forgets one entry, and the image it pointed at when nothing else uses
     /// it. Returns false when the entry had already gone.
     @discardableResult
     public func remove(id: String) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-
-        guard let index = items.firstIndex(where: { $0.id == id }) else {
+        guard let history, (try? history.remove(id: id)) == true else {
             return false
         }
 
-        items.remove(at: index)
-        assetStore.removeOrphans(keeping: items.compactMap(\.image))
-        save()
+        assetStore.removeOrphans(keeping: referencedAssets())
+
         return true
     }
 
@@ -665,32 +678,19 @@ public final class ClipboardHistoryStore {
     }
 
     public func recentItems(limit: Int = ClipboardConstants.maxVisibleItems) -> [ClipboardItem] {
-        lock.lock()
-        defer { lock.unlock() }
-
-        return Array(items.prefix(limit))
+        (try? history?.recentItems(limit: limit)) ?? []
     }
 
-    private static func loadItems(from url: URL) -> [ClipboardItem] {
-        guard let data = try? Data(contentsOf: url) else {
-            return []
+    private func trim() {
+        guard let history, (try? history.trim(to: maxStoredItems)) == true else {
+            return
         }
 
-        return (try? JSONDecoder().decode([ClipboardItem].self, from: data)) ?? []
+        assetStore.removeOrphans(keeping: referencedAssets())
     }
 
-    private func save() {
-        do {
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-
-            let data = try JSONEncoder().encode(items)
-            try data.write(to: url, options: [.atomic])
-        } catch {
-            // Clipboard history is best effort; runtime paste behavior should keep working.
-        }
+    private func referencedAssets() -> [ClipboardAsset] {
+        (try? history?.referencedAssets()) ?? []
     }
 }
 

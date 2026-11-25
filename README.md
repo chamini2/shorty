@@ -172,7 +172,11 @@ the search box needs for deleting to the start of the line.
     link-previews: false
   ```
 
-- Persists across restarts in `~/Library/Application Support/Shorty/ClipboardHistory.json`.
+- Persists across restarts in `~/Library/Application Support/Shorty/Shorty.sqlite`,
+  alongside link previews and recently opened files. Copied images and preview
+  pictures stay as files beside it, named by the hash of their contents. An
+  older install's JSON files are imported on first launch and kept, renamed,
+  rather than deleted.
 - The right-hand pane shows the entry in full, with its source, type, size and when it was copied.
 
 ### Snippets
