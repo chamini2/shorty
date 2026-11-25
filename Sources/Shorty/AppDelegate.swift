@@ -19,6 +19,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dynamicShortcutItems: [NSMenuItem] = []
     let box = ShortyBoxController()
     private lazy var clipboardPickerPanel = ClipboardPickerPanelController(box: box)
+    private lazy var scratchPadPanel: ScratchPadPanelController = {
+        let panel = ScratchPadPanelController(box: box)
+        panel.copyHandler = { text in
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+        }
+
+        return panel
+    }()
     private let applicationIndex = ApplicationIndex()
     private let recentFiles = RecentFileStore()
     private let recentApps = RecentAppStore()
@@ -51,6 +61,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.showCommandPalette()
             }
         }
+        controller.scratchPadHandler = { [weak self] in
+            DispatchQueue.main.async {
+                self?.showScratchPad()
+            }
+        }
         // A copied link is read the moment it lands, so its card is waiting
         // by the time the picker is opened at all.
         controller.clipboardCaptureHandler = { [weak self] item in
@@ -81,6 +96,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     targetApplication: commandPaletteTargetApplication
                 )
                 return clipboardPickerPanel
+
+            case .scratchPad:
+                return scratchPadPanel
             }
         }
         commandPalettePanel.actionHandler = { [weak self] action in
@@ -395,6 +413,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         commandPalettePanel.applicationOpens = recentApps.opens()
         box.boundHotKeys = controller.boundHotKeys
         commandPalettePanel.show()
+    }
+
+    /// The pad on its own, rather than stepped into from the command box.
+    private func showScratchPad() {
+        if box.isVisible {
+            box.close()
+            return
+        }
+
+        box.boundHotKeys = controller.boundHotKeys
+        box.open(scratchPadPanel)
     }
 
     private func handleClipboardMenuHotKey(_ kind: ClipboardMenuKind) {

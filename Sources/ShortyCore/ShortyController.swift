@@ -11,6 +11,7 @@ public final class ShortyController {
     public var statusHandler: StatusHandler?
     public var clipboardMenuHandler: ((ClipboardMenuKind) -> Void)?
     public var textCommandHandler: (() -> Void)?
+    public var scratchPadHandler: (() -> Void)?
     public var commandBoxSettingsHandler: ((CommandBoxSettings) -> Void)?
     public var windowSwitcherHandler: ((WindowSwitcherUpdate) -> Void)?
     public var permissionRequestHandler: ((ShortyPermissionPane) -> Void)?
@@ -239,6 +240,11 @@ public final class ShortyController {
         append(loadedBindings.commandBox) { [weak self] in
             self?.console.info("Hotkey for command box triggered.")
             self?.textCommandHandler?()
+        }
+
+        append(loadedBindings.scratchPad) { [weak self] in
+            self?.console.info("Hotkey for scratch pad triggered.")
+            self?.scratchPadHandler?()
         }
 
         let moveBindings: [(KeyCombo?, WindowMoveCommand)] = [

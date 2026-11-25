@@ -64,6 +64,9 @@ public enum HotKeyBindingsParser {
             case HotKeyBindingName.commandBox:
                 bindings.commandBox = try combo(from: pair.value, name: name)
 
+            case HotKeyBindingName.scratchPad:
+                bindings.scratchPad = try combo(from: pair.value, name: name)
+
             case HotKeyBindingName.windowSwitcher:
                 try applyWindowSwitcher(pair.value, to: &bindings)
 

@@ -257,6 +257,28 @@ Inside the command box, `cmd+shift+v` / `cmd+shift+b` open the clipboard / snipp
 
 To turn the command box off, set `command-box: off` under `hotkeys`. Shorty then leaves `option+space` to other apps, and an app shortcut may use it.
 
+## Scratch Pad
+
+A page to work text over before it goes anywhere. The pasteboard is a bad
+workbench — every intermediate step overwrites the thing being worked on — so
+`cmd+shift+e` opens a plain-text page that stays as it was left: paste
+something in, reshape it, and copy out the version you wanted. The command box
+reaches it too, as `Scratch Pad`.
+
+| Key | Does |
+| --- | --- |
+| `cmd+return` | Copy the whole page and close |
+| `shift+cmd+return` | Copy just the selection and close |
+| `escape` | Close, leaving the page as it is |
+
+Ordinary editing keys work inside it: `cmd+a`, `cmd+c`, `cmd+v`, `cmd+x`,
+`cmd+z` and `shift+cmd+z`.
+
+The page is plain text, so what comes out pastes as itself rather than carrying
+formatting from wherever it came from. It is kept across restarts, but it is
+one page and not a note: copying out does not clear it, and nothing is
+versioned. The footer counts lines, words and characters.
+
 ## Hotkeys
 
 Every built-in key lives in an optional top-level `hotkeys` section. Set a key to rebind it, or to `off` to unbind it:
@@ -265,6 +287,7 @@ Every built-in key lives in an optional top-level `hotkeys` section. Set a key t
 hotkeys:
   clipboard-menu: cmd+shift+v
   snippets-menu: cmd+shift+b
+  scratch-pad: cmd+shift+e
   command-box: off
   window-switcher:
     all-windows: cmd+tab

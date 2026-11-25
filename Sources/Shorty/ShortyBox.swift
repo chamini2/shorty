@@ -266,6 +266,45 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         isDeliveringCapturedKey = false
     }
 
+    /// The editing shortcuts every text field is expected to answer.
+    ///
+    /// They are menu key equivalents, not key bindings, and Shorty has no
+    /// menu bar to hold them: delivered as plain key events, `cmd+a` typed an
+    /// `a` and `cmd+z` did nothing. Sent as actions they find whatever is
+    /// being edited through the responder chain, as a menu would.
+    private func performsEditingCommand(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        guard flags == .command || flags == [.command, .shift] else {
+            return false
+        }
+
+        let selector: Selector?
+
+        switch (event.charactersIgnoringModifiers?.lowercased(), flags.contains(.shift)) {
+        case ("a", false):
+            selector = #selector(NSText.selectAll(_:))
+        case ("c", false):
+            selector = #selector(NSText.copy(_:))
+        case ("x", false):
+            selector = #selector(NSText.cut(_:))
+        case ("v", false):
+            selector = #selector(NSText.paste(_:))
+        case ("z", false):
+            selector = Selector(("undo:"))
+        case ("z", true):
+            selector = Selector(("redo:"))
+        default:
+            selector = nil
+        }
+
+        guard let selector else {
+            return false
+        }
+
+        return NSApp.sendAction(selector, to: nil, from: panel.firstResponder)
+    }
+
     private func stopKeyboardCapture() {
         guard let keyboardTap else {
             return
@@ -305,7 +344,7 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
             return Unmanaged.passUnretained(event)
         }
 
-        if panel.keyEventHandler?(keyEvent) != true {
+        if panel.keyEventHandler?(keyEvent) != true, !performsEditingCommand(keyEvent) {
             deliver(keyEvent)
         }
 

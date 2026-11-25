@@ -37,6 +37,7 @@ public enum CommandSearchKind: Equatable, Sendable {
 
 public enum CommandViewKind: Equatable, Sendable {
     case clipboard(ClipboardMenuKind)
+    case scratchPad
 }
 
 /// How much room a row is given.
@@ -298,6 +299,13 @@ public enum CommandCatalog {
                 detail: applications.isEmpty ? "None found" : "\(applications.count) installed",
                 destination: .list(applicationEntries(applications, opens: applicationOpens)),
                 keywords: ["app", "apps", "open", "launch", "run"]
+            ),
+            CommandEntry(
+                id: "scratch-pad",
+                title: "Scratch Pad",
+                detail: "Work text over before copying it out",
+                destination: .view(.scratchPad),
+                keywords: ["scratch", "edit", "draft", "note", "text", "format", "pad"]
             ),
             CommandEntry(
                 id: "files",

@@ -155,6 +155,30 @@ public final class ShortyDatabase: @unchecked Sendable {
         }
     }
 
+    /// A value remembered between launches, by name.
+    ///
+    /// `meta` already holds the schema version; anything small and singular
+    /// belongs here rather than in a table of its own.
+    public func metaValue(for key: String) -> String? {
+        locked {
+            try? sqlite.query("SELECT value FROM meta WHERE key = ?", [.text(key)]).first?[0].string
+        }
+    }
+
+    public func setMetaValue(_ value: String?, for key: String) {
+        locked {
+            guard let value else {
+                try? sqlite.run("DELETE FROM meta WHERE key = ?", [.text(key)])
+                return
+            }
+
+            try? sqlite.run(
+                "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [.text(key), .text(value)]
+            )
+        }
+    }
+
     /// Whether anything has been imported or written yet, which is what says
     /// a migration from the old JSON files is still owed.
     func isEmpty(table: String) -> Bool {
