@@ -77,10 +77,9 @@ final class ClipboardTextRecognitionTests: XCTestCase {
     }
 
     func testNothingLegibleReadsAsNothing() throws {
-        let blank = try XCTUnwrap(
-            NSBitmapImageRep(data: try XCTUnwrap(NSImage(size: NSSize(width: 40, height: 40)).tiffRepresentation))
-                .representation(using: .png, properties: [:])
-        )
+        let tiff = try XCTUnwrap(NSImage(size: NSSize(width: 40, height: 40)).tiffRepresentation)
+        let representation = try XCTUnwrap(NSBitmapImageRep(data: tiff))
+        let blank = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
 
         XCTAssertNil(ClipboardTextRecognition.text(in: blank))
     }
