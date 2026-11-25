@@ -20,9 +20,10 @@ struct ClipboardHistoryDatabase {
                     INSERT INTO items (
                         id, plain_text, rtf, rtfd, created_at, updated_at,
                         source_bundle, source_name,
-                        image_file, image_type, image_bytes, image_width, image_height
+                        image_file, image_type, image_bytes, image_width, image_height,
+                        ocr_text
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         plain_text = excluded.plain_text,
                         rtf = excluded.rtf,
@@ -35,7 +36,8 @@ struct ClipboardHistoryDatabase {
                         image_type = excluded.image_type,
                         image_bytes = excluded.image_bytes,
                         image_width = excluded.image_width,
-                        image_height = excluded.image_height
+                        image_height = excluded.image_height,
+                        ocr_text = COALESCE(excluded.ocr_text, items.ocr_text)
                     """,
                     [
                         .text(item.id),
@@ -51,6 +53,7 @@ struct ClipboardHistoryDatabase {
                         item.image.map { SQLiteValue.integer(Int64($0.byteSize)) } ?? .null,
                         item.image.map { SQLiteValue.integer(Int64($0.pixelWidth)) } ?? .null,
                         item.image.map { SQLiteValue.integer(Int64($0.pixelHeight)) } ?? .null,
+                        item.ocrText.map(SQLiteValue.text) ?? .null,
                     ]
                 )
 
@@ -103,6 +106,40 @@ struct ClipboardHistoryDatabase {
         }
     }
 
+    /// Stores what was read out of an entry's picture.
+    ///
+    /// A plain column update: the entry's identity is a hash of what was
+    /// copied, which this is not part of, so the row keeps its key.
+    func setOCRText(_ text: String?, for id: String) throws {
+        try database.locked {
+            try database.sqlite.run(
+                "UPDATE items SET ocr_text = ? WHERE id = ?",
+                [text.map(SQLiteValue.text) ?? .null, .text(id)]
+            )
+        }
+    }
+
+    /// Entries with a picture nothing has been read out of yet.
+    func itemsAwaitingText(limit: Int) throws -> [(id: String, fileName: String)] {
+        try database.locked {
+            try database.sqlite.query(
+                """
+                SELECT id, image_file FROM items
+                WHERE image_file IS NOT NULL AND ocr_text IS NULL
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                [.integer(Int64(limit))]
+            ).compactMap { row in
+                guard let id = row[0].string, let fileName = row[1].string else {
+                    return nil
+                }
+
+                return (id, fileName)
+            }
+        }
+    }
+
     @discardableResult
     func remove(id: String) throws -> Bool {
         try database.locked {
@@ -117,7 +154,8 @@ struct ClipboardHistoryDatabase {
                 """
                 SELECT id, plain_text, rtf, rtfd, created_at, updated_at,
                        source_bundle, source_name,
-                       image_file, image_type, image_bytes, image_width, image_height
+                       image_file, image_type, image_bytes, image_width, image_height,
+                       ocr_text
                 FROM items
                 ORDER BY updated_at DESC
                 LIMIT ?
@@ -236,7 +274,8 @@ struct ClipboardHistoryDatabase {
             updatedAt: Date(timeIntervalSince1970: row[5].double ?? 0),
             source: source,
             image: image,
-            files: files
+            files: files,
+            ocrText: row.count > 13 ? row[13].string : nil
         )
     }
 }

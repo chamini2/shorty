@@ -80,7 +80,8 @@ public final class ShortyDatabase: @unchecked Sendable {
                     image_type    TEXT,
                     image_bytes   INTEGER,
                     image_width   INTEGER,
-                    image_height  INTEGER
+                    image_height  INTEGER,
+                    ocr_text      TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS items_by_recency ON items (updated_at DESC);
@@ -133,6 +134,24 @@ public final class ShortyDatabase: @unchecked Sendable {
                 "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO NOTHING",
                 [.text(String(Self.schemaVersion))]
             )
+
+            try addMissingColumns()
+        }
+    }
+
+    /// Columns added after a database was first written.
+    ///
+    /// `CREATE TABLE IF NOT EXISTS` leaves an existing table exactly as it
+    /// was, so a new column has to be asked for separately. Adding one is
+    /// cheap in SQLite and the value is null for every row already there,
+    /// which is what a history with nothing read out of its pictures means.
+    private func addMissingColumns() throws {
+        let existing = Set(
+            try sqlite.query("PRAGMA table_info(items)").compactMap { $0[1].string }
+        )
+
+        if !existing.contains("ocr_text") {
+            try sqlite.execute("ALTER TABLE items ADD COLUMN ocr_text TEXT")
         }
     }
 

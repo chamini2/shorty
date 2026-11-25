@@ -116,6 +116,8 @@ public final class ShortyController {
             loadedCommandBox = configuration.commandBox
             loadedClipboardSettings = configuration.clipboard
             clipboardHistoryStore.setMaximumItems(configuration.clipboard.historyLimit)
+            clipboardHistoryStore.setReadsPictures(configuration.clipboard.readsPictures)
+            clipboardHistoryStore.readPicturesAlreadyStored()
             commandBoxSettingsHandler?(loadedCommandBox)
             if didCompleteStart, loadedBindings != previousBindings {
                 applyBindings(changedFrom: previousBindings)

@@ -151,6 +151,18 @@ the search box needs for deleting to the start of the line.
 
 - Keeps plain text and rich text (RTF, HTML, etc.).
 - Keeps copied images, up to 10 MB each, beside the history in `ClipboardAssets/`. Pasting writes the image data, not a file path.
+- Reads the words in a copied picture, so a screenshot of an error or a page of
+  code is listed by what it says and found by searching for it. Reading happens
+  on-device, after the entry is stored, so copying never waits for it; pictures
+  copied before this existed are read in the background on the next launch.
+  What is read is a label and a search key: pasting a screenshot still pastes
+  the picture. Turn it off with:
+
+  ```yaml
+  clipboard:
+    read-images: false
+  ```
+
 - Keeps copied files as paths rather than copies, so pasting hands over the file itself. An entry whose file has moved says so and is skipped.
 - Skips anything the copier marked private: `org.nspasteboard.ConcealedType`,
   which password managers and Keychain Access set on a copied secret, and the

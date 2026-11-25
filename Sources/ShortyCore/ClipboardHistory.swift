@@ -96,6 +96,9 @@ public struct ClipboardSource: Codable, Equatable, Sendable {
 public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public var plainText: String
+    /// What Vision read in `image`, once it has. A label and a search key,
+    /// never what gets pasted.
+    public var ocrText: String?
     public var rtfData: Data?
     public var rtfdData: Data?
     public var additionalRepresentations: [ClipboardRepresentation]
@@ -117,8 +120,12 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         updatedAt: Date = Date(),
         source: ClipboardSource? = nil,
         image: ClipboardAsset? = nil,
-        files: [ClipboardFileReference] = []
+        files: [ClipboardFileReference] = [],
+        ocrText: String? = nil
     ) {
+        // `ocrText` is not part of the id: it is read out of the picture
+        // after the entry exists, and an identity that changed when the
+        // reading arrived would stop matching the row it was stored under.
         self.id = Self.makeID(
             plainText: plainText,
             rtfData: rtfData,
@@ -128,6 +135,7 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
             files: files
         )
         self.plainText = plainText
+        self.ocrText = ocrText
         self.rtfData = rtfData
         self.rtfdData = rtfdData
         self.additionalRepresentations = additionalRepresentations
@@ -144,6 +152,10 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
 
         if plainText.isEmpty, image != nil {
             values.append("image")
+
+            if let ocrText {
+                values.append(ocrText)
+            }
         }
 
         values.append(contentsOf: files.map(\.name))
@@ -159,6 +171,12 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         }
 
         if let image {
+            // What the picture says, when it says anything; its size is all
+            // there is to show otherwise.
+            if let ocrText, !ocrText.isEmpty {
+                return ocrText
+            }
+
             return "Image \(image.pixelSizeLabel)"
         }
 
@@ -563,14 +581,19 @@ public final class ClipboardHistoryStore {
     private var maxStoredItems: Int
     private let assetStore: ClipboardAssetStore
     private let history: ClipboardHistoryDatabase?
+    /// Settable like the limit, since it comes from config read after the
+    /// store is built.
+    private var readsPictures: Bool
 
     public init(
         database: ShortyDatabase? = .shared,
         maxStoredItems: Int = ClipboardConstants.maxStoredItems,
         assetStore: ClipboardAssetStore? = nil,
-        directory: URL? = nil
+        directory: URL? = nil,
+        readsPictures: Bool = true
     ) {
         self.maxStoredItems = maxStoredItems
+        self.readsPictures = readsPictures
         // Pictures live beside the database that references them. Left to a
         // fixed path, a store opened on a scratch database swept the real
         // directory, where nothing it could see was referenced: every image
@@ -620,6 +643,11 @@ public final class ClipboardHistoryStore {
 
     /// Trims at once when the limit comes down, so a smaller number in the
     /// config takes effect rather than waiting for the next copy.
+    /// Whether copied pictures are read, which the config can turn off.
+    public func setReadsPictures(_ reads: Bool) {
+        readsPictures = reads
+    }
+
     public func setMaximumItems(_ limit: Int) {
         guard limit != maxStoredItems else {
             return
@@ -647,7 +675,68 @@ public final class ClipboardHistoryStore {
 
         try? history.write(savedItem)
         trim()
+
+        readPicture(of: savedItem)
     }
+
+    /// Reads the pictures already in the history that nothing has been read
+    /// out of: everything copied before this existed, and anything a crash
+    /// or a `read-images: off` spell left unread.
+    public func readPicturesAlreadyStored(limit: Int = 200) {
+        guard readsPictures, let history else {
+            return
+        }
+
+        let assetStore = assetStore
+
+        Self.recognitionQueue.async {
+            guard let pending = try? history.itemsAwaitingText(limit: limit) else {
+                return
+            }
+
+            for entry in pending {
+                guard let data = assetStore.data(forFileName: entry.fileName) else {
+                    continue
+                }
+
+                // Nothing legible is still an answer: stored empty, so the
+                // picture is not read again on every launch.
+                let text = ClipboardTextRecognition.text(in: data) ?? ""
+                try? history.setOCRText(text, for: entry.id)
+            }
+        }
+    }
+
+    /// Reads the words in a copied picture, after the entry is stored.
+    ///
+    /// Off the copy path on purpose: recognition takes a few hundred
+    /// milliseconds, and the pasteboard poll runs where a stall shows. The
+    /// entry is already in the history by the time this starts, and gains
+    /// its text whenever that finishes.
+    private func readPicture(of item: ClipboardItem) {
+        guard readsPictures, let image = item.image, item.ocrText == nil else {
+            return
+        }
+
+        let assetStore = assetStore
+        let history = history
+
+        Self.recognitionQueue.async {
+            guard let data = assetStore.data(for: image),
+                  let text = ClipboardTextRecognition.text(in: data) else {
+                return
+            }
+
+            try? history?.setOCRText(text, for: item.id)
+        }
+    }
+
+    /// One picture at a time: recognition is CPU-heavy, and a burst of
+    /// copies should not take the machine.
+    private static let recognitionQueue = DispatchQueue(
+        label: "com.shorty.clipboard.recognition",
+        qos: .utility
+    )
 
     /// Forgets one entry, and the image it pointed at when nothing else uses
     /// it. Returns false when the entry had already gone.

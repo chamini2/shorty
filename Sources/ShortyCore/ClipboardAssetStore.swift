@@ -97,7 +97,16 @@ public final class ClipboardAssetStore {
     }
 
     public func data(for asset: ClipboardAsset) -> Data? {
-        try? Data(contentsOf: url(for: asset))
+        data(forFileName: asset.fileName)
+    }
+
+    /// By name, for callers holding a row rather than a rebuilt entry.
+    public func data(forFileName fileName: String) -> Data? {
+        guard Self.isStoredAsset(fileName) else {
+            return nil
+        }
+
+        return try? Data(contentsOf: directory.appendingPathComponent(fileName))
     }
 
     public func image(for asset: ClipboardAsset) -> NSImage? {

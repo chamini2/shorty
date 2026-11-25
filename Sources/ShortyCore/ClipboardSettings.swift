@@ -28,12 +28,19 @@ public struct ClipboardSettings: Equatable, Sendable {
     /// so the default is generous enough to search rather than to undo.
     public let historyLimit: Int
 
+    /// Whether the words in a copied picture are read, so a screenshot is
+    /// searchable by what it says. On-device and off the copy path; off for
+    /// anyone who would rather their screenshots went unread.
+    public let readsPictures: Bool
+
     public init(
         linkPreviewsEnabled: Bool = true,
-        historyLimit: Int = ClipboardConstants.maxStoredItems
+        historyLimit: Int = ClipboardConstants.maxStoredItems,
+        readsPictures: Bool = true
     ) {
         self.linkPreviewsEnabled = linkPreviewsEnabled
         self.historyLimit = historyLimit
+        self.readsPictures = readsPictures
     }
 }
 
@@ -61,12 +68,20 @@ public enum ClipboardSettingsParser {
             case "link-previews":
                 settings = ClipboardSettings(
                     linkPreviewsEnabled: try boolean(from: pair.value, name: name),
-                    historyLimit: settings.historyLimit
+                    historyLimit: settings.historyLimit,
+                    readsPictures: settings.readsPictures
                 )
             case "history-limit":
                 settings = ClipboardSettings(
                     linkPreviewsEnabled: settings.linkPreviewsEnabled,
-                    historyLimit: try count(from: pair.value, name: name)
+                    historyLimit: try count(from: pair.value, name: name),
+                    readsPictures: settings.readsPictures
+                )
+            case "read-images":
+                settings = ClipboardSettings(
+                    linkPreviewsEnabled: settings.linkPreviewsEnabled,
+                    historyLimit: settings.historyLimit,
+                    readsPictures: try boolean(from: pair.value, name: name)
                 )
             default:
                 throw ClipboardSettingsError.unknownSetting(name)
