@@ -30,6 +30,9 @@ public final class ShortyController {
     public private(set) var loadedBindings: HotKeyBindings = .default
     public private(set) var loadedCommandBox: CommandBoxSettings = .default
     public private(set) var loadedClipboardSettings: ClipboardSettings = .default
+    /// Why the config last failed to load, cleared by the next good load.
+    /// Whatever loaded before keeps running in the meantime.
+    public private(set) var configIssue: String?
     private var numpadAliases = NumpadAliasResolver(claimedHotKeys: [])
 
     private let console: Console
@@ -121,15 +124,18 @@ public final class ShortyController {
             let snippetCount = configuration.snippetGroups.reduce(0) { $0 + $1.snippets.count }
             let summary = "Loaded \(configuration.shortcuts.count) shortcut(s) and \(snippetCount) snippet(s)."
             console.info("\(summary) From \(options.configURL.path). Reason: \(reason).")
+            configIssue = nil
             publishStatus(summary)
         } catch {
             let snippetCount = loadedSnippetGroups.reduce(0) { $0 + $1.snippets.count }
             let fallback = loadedShortcuts.isEmpty && snippetCount == 0
                 ? "No shortcuts or snippets active."
                 : "Keeping \(loadedShortcuts.count) previous shortcut(s) and \(snippetCount) previous snippet(s)."
-            let message = "Config reload failed: \(error). \(fallback)"
-            console.error(message)
-            publishStatus(message)
+            console.error("Config reload failed: \(error). \(fallback)")
+            // The error is published on its own; the status says what is
+            // still running, so the two are not shown twice over.
+            configIssue = "\(error)"
+            publishStatus(fallback)
         }
     }
 

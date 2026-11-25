@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowsWindow: NSWindow?
     private weak var windowsTextView: NSTextView?
     private let menu = NSMenu()
+    private let issueMenuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let stateMenuItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
     private let pathMenuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let shortcutsHeaderItem = NSMenuItem(title: "Shortcuts", action: nil, keyEquivalent: "")
@@ -35,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.statusHandler = { [weak self] message in
             DispatchQueue.main.async {
                 self?.updateStatus(message)
+                self?.updateConfigIssue()
                 self?.reloadShortcutItems()
             }
         }
@@ -115,7 +117,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.imagePosition = .imageOnly
         }
 
-        updateKeepAwakeIndicator()
+        updateStatusIcon()
+
+        issueMenuItem.action = #selector(revealConfig)
+        issueMenuItem.target = self
+        issueMenuItem.image = NSImage(
+            systemSymbolName: "exclamationmark.triangle.fill",
+            accessibilityDescription: "Config error"
+        )?.withSymbolConfiguration(.init(paletteColors: [.systemYellow]))
+        issueMenuItem.isHidden = true
 
         stateMenuItem.isEnabled = false
         pathMenuItem.isEnabled = false
@@ -124,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shortcutsHeaderItem.isEnabled = false
         emptyShortcutsItem.isEnabled = false
 
+        menu.addItem(issueMenuItem)
         menu.addItem(stateMenuItem)
         menu.addItem(pathMenuItem)
         menu.addItem(.separator())
@@ -188,6 +199,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stateMenuItem.title = Self.menuLine(message)
         stateMenuItem.toolTip = message
         statusItem?.button?.toolTip = message
+    }
+
+    /// Shows why the config failed to load, both as a badge on the menu bar
+    /// cup and as a line at the top of the menu that opens the config.
+    private func updateConfigIssue() {
+        let issue = controller.configIssue
+        issueMenuItem.isHidden = issue == nil
+
+        if let issue {
+            let line = "Config error: \(issue)"
+            issueMenuItem.title = Self.menuLine(line)
+            issueMenuItem.toolTip = "\(line)\nClick to reveal the config."
+            statusItem?.button?.toolTip = line
+        }
+
+        updateStatusIcon()
     }
 
     /// Keeps a menu line short enough that it does not set the menu's width,
@@ -311,7 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         case let .setKeepAwake(active):
             controller.setKeepAwake(active)
-            updateKeepAwakeIndicator()
+            updateStatusIcon()
 
         }
     }
@@ -319,11 +346,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc
     private func toggleKeepAwake() {
         controller.setKeepAwake(!controller.isKeepAwakeActive)
-        updateKeepAwakeIndicator()
+        updateStatusIcon()
     }
 
-    /// The menu bar cup fills while sleep is held off and empties when it is
-    /// not, which says the same thing as the tick in the menu below it.
     /// Reads a copied link's card straight away. The setting is honoured
     /// here too: with previews off, nothing is fetched at all.
     private func prefetchLinkPreview(for item: ClipboardItem) {
@@ -336,7 +361,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clipboardPickerPanel.prefetchLinkPreviews([url])
     }
 
-    private func updateKeepAwakeIndicator() {
+    /// The menu bar cup fills while sleep is held off and empties when it is
+    /// not, which says the same thing as the tick in the menu below it. A
+    /// config that failed to load adds a warning badge on top of either.
+    private func updateStatusIcon() {
         let active = controller.isKeepAwakeActive
         keepAwakeItem.state = active ? .on : .off
 
@@ -344,7 +372,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        button.image = StatusIcon.cup(filled: active)
+        button.image = StatusIcon.cup(filled: active, warning: controller.configIssue != nil)
     }
 
     private func showCommandPalette() {

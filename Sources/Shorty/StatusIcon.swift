@@ -1,6 +1,7 @@
 import AppKit
 
-/// The menu bar cup: empty, or full with steam rising off it.
+/// The menu bar cup: empty, or full with steam rising off it, and with a
+/// warning triangle in its corner while the config fails to load.
 ///
 /// `cup.and.saucer.fill` is a solid cup with its opening knocked out, so
 /// filling that opening reads as coffee seen from above. SF Symbols has no
@@ -22,6 +23,9 @@ enum StatusIcon {
         static let rayWidth: CGFloat = 1.3
         /// How wide the steam fans out, centred on straight up.
         static let raySpread = CGFloat.pi * 0.35
+        static let badgePointSize: CGFloat = 9
+        /// Clear space cut around the badge so it does not merge with the cup.
+        static let badgeHalo: CGFloat = 1.2
     }
 
     /// Where the opening sits inside the symbol, measured from the rendered
@@ -33,12 +37,12 @@ enum StatusIcon {
         static let maxY: CGFloat = 0.863
     }
 
-    static func cup(filled: Bool) -> NSImage? {
+    static func cup(filled: Bool, warning: Bool = false) -> NSImage? {
         let configuration = NSImage.SymbolConfiguration(pointSize: Metrics.pointSize, weight: .regular)
 
         guard let cup = NSImage(
             systemSymbolName: "cup.and.saucer.fill",
-            accessibilityDescription: filled ? "Shorty, keeping the Mac awake" : "Shorty"
+            accessibilityDescription: accessibilityDescription(filled: filled, warning: warning)
         )?.withSymbolConfiguration(configuration) else {
             return nil
         }
@@ -71,11 +75,58 @@ enum StatusIcon {
             steam(above: opening).stroke()
         }
 
+        if warning {
+            drawBadge(in: canvas)
+        }
+
         image.unlockFocus()
 
         // Template, so the menu bar tints it for light and dark alike.
         image.isTemplate = true
         return image
+    }
+
+    private static func accessibilityDescription(filled: Bool, warning: Bool) -> String {
+        switch (filled, warning) {
+        case (_, true): return "Shorty, config failed to load"
+        case (true, false): return "Shorty, keeping the Mac awake"
+        case (false, false): return "Shorty"
+        }
+    }
+
+    /// A warning triangle in the bottom-right corner, over the saucer, with
+    /// the cup cleared away around it. Template like the rest, since the
+    /// menu bar only tints template images for its appearance.
+    private static func drawBadge(in canvas: NSSize) {
+        let configuration = NSImage.SymbolConfiguration(pointSize: Metrics.badgePointSize, weight: .bold)
+
+        guard let badge = NSImage(
+            systemSymbolName: "exclamationmark.triangle.fill",
+            accessibilityDescription: nil
+        )?.withSymbolConfiguration(configuration) else {
+            return
+        }
+
+        let badgeRect = NSRect(
+            x: canvas.width - badge.size.width,
+            y: 0,
+            width: badge.size.width,
+            height: badge.size.height
+        )
+
+        // The badge's own silhouette, grown by the halo, punched out of the cup.
+        for dx in [-Metrics.badgeHalo, 0, Metrics.badgeHalo] {
+            for dy in [-Metrics.badgeHalo, 0, Metrics.badgeHalo] {
+                badge.draw(
+                    in: badgeRect.offsetBy(dx: dx, dy: dy),
+                    from: .zero,
+                    operation: .destinationOut,
+                    fraction: 1
+                )
+            }
+        }
+
+        badge.draw(in: badgeRect)
     }
 
     private static func steam(above opening: NSRect) -> NSBezierPath {

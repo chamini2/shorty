@@ -427,7 +427,10 @@ Shorty --help
 ### Menu Bar
 
 The icon is a cup, which fills with coffee and steams while `Keep the Mac
-Awake` is on.
+Awake` is on. If the config fails to load, a warning triangle sits in the
+cup's corner and the top of the menu says what went wrong; clicking that line
+reveals the config. Shorty keeps running whatever loaded before, and the
+warning clears on the next good load.
 
 The menu shows status, config path, and loaded shortcuts, plus `Keep the Mac
 Awake`, `Show Windows`, `Reload Config`, `Reveal Config`, `Open Accessibility
