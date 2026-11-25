@@ -131,8 +131,11 @@ public final class WindowSwitchingIndex: @unchecked Sendable {
     private var isRefreshingShortcutMetadata = false
     private var iconWarmupPIDs = Set<pid_t>()
     private var nextWindowID: UInt64 = 1
-    private var refreshTimer: Timer?
-    private var focusedWindowTimer: Timer?
+    /// Window news arrives rather than being asked for; see `WindowObservers`.
+    private var observers: WindowObservers?
+    /// Coalesces a burst: opening a document can report a created window, a
+    /// focus change and a destroyed element in the same breath.
+    private var pendingRefresh: DispatchWorkItem?
 
     public init() {}
 
@@ -141,32 +144,51 @@ public final class WindowSwitchingIndex: @unchecked Sendable {
         refreshFast()
         sampleFocusedWindow()
 
-        refreshTimer = Timer.scheduledTimer(
-            timeInterval: 1.0,
-            target: self,
-            selector: #selector(refreshTimerDidFire),
-            userInfo: nil,
-            repeats: true
-        )
-        refreshTimer?.tolerance = 0.25
-
-        focusedWindowTimer = Timer.scheduledTimer(
-            timeInterval: 0.25,
-            target: self,
-            selector: #selector(focusedWindowTimerDidFire),
-            userInfo: nil,
-            repeats: true
-        )
-        focusedWindowTimer?.tolerance = 0.1
+        // The observers and their callbacks live on the main run loop, which
+        // is where the index is driven from.
+        MainActor.assumeIsolated {
+            let observers = WindowObservers { [weak self] in
+                self?.scheduleRefresh()
+            }
+            observers.start()
+            self.observers = observers
+        }
     }
 
     public func stop() {
-        refreshTimer?.invalidate()
-        refreshTimer = nil
-        focusedWindowTimer?.invalidate()
-        focusedWindowTimer = nil
+        pendingRefresh?.cancel()
+        pendingRefresh = nil
+
+        MainActor.assumeIsolated {
+            observers?.stop()
+            observers = nil
+        }
         isRefreshingShortcutMetadata = false
     }
+
+    /// Accessibility reports a change the instant it happens, which is often
+    /// before the app has finished making it: a window being created is
+    /// announced before it has a title. A beat later everything has settled.
+    private func scheduleRefresh() {
+        guard pendingRefresh == nil else {
+            return
+        }
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else {
+                return
+            }
+
+            pendingRefresh = nil
+            refreshFast()
+            sampleFocusedWindow()
+        }
+
+        pendingRefresh = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.refreshDelay, execute: work)
+    }
+
+    private static let refreshDelay: TimeInterval = 0.05
 
     public func replaceShortcuts(_ shortcuts: [LoadedShortcut]) {
         loadedShortcuts = shortcuts
@@ -175,14 +197,14 @@ public final class WindowSwitchingIndex: @unchecked Sendable {
     }
 
     public func allWindowsInMRUOrder() -> [SwitchableWindow] {
-        refreshFastIfEmpty()
+        refreshFast()
         sampleFocusedWindow()
         scheduleShortcutMetadataRefreshIfNeeded()
         return ordered(cachedWindows)
     }
 
     public func windowsForFrontmostApplicationInMRUOrder() -> [SwitchableWindow] {
-        refreshFastIfEmpty()
+        refreshFast()
         sampleFocusedWindow()
         scheduleShortcutMetadataRefreshIfNeeded()
 
@@ -207,16 +229,6 @@ public final class WindowSwitchingIndex: @unchecked Sendable {
 
     public func markFocused(_ window: SwitchableWindow) {
         promote(windowID: window.id)
-    }
-
-    @objc
-    private func refreshTimerDidFire() {
-        refreshFast()
-    }
-
-    @objc
-    private func focusedWindowTimerDidFire() {
-        sampleFocusedWindow()
     }
 
     private func refreshFastIfEmpty() {
