@@ -65,6 +65,8 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     private var onSelect: ((ClipboardPickerResult, ClipboardPickerActivationMode) -> Void)?
     private var onCancel: (() -> Void)?
     private var onDelete: ((ClipboardItem) -> Void)?
+    /// Hands text to the scratch pad and shows it.
+    var scratchPadHandler: ((String) -> Void)?
     private var keyMonitor: Any?
     private var locallyHandledKeyEvent: HandledKeyEvent?
     private var sourceIconCache: [String: NSImage] = [:]
@@ -340,7 +342,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
                 return true
             }
 
-            return enterSelectedFolderIfNeeded()
+            return stepIntoSelected()
 
         case #selector(NSResponder.deleteBackward(_:)),
             #selector(NSResponder.deleteForward(_:)):
@@ -488,7 +490,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
             return leaveFolderIfNeeded()
 
         case UInt32(kVK_RightArrow):
-            return enterSelectedFolderIfNeeded()
+            return stepIntoSelected()
 
         case UInt32(kVK_Delete), UInt32(kVK_ForwardDelete):
             // Shift, not command: `cmd+backspace` means "delete to the start
@@ -511,6 +513,46 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         default:
             return false
         }
+    }
+
+    /// Right steps into the selected row: a folder opens, and an entry —
+    /// which has no inside of its own — goes to the scratch pad to be worked
+    /// over. Escape comes back from either.
+    private func stepIntoSelected() -> Bool {
+        if enterSelectedFolderIfNeeded() {
+            return true
+        }
+
+        guard let text = selectedTextForScratchPad else {
+            return false
+        }
+
+        scratchPadHandler?(text)
+        return true
+    }
+
+    /// What is selected, for the scratch pad to open on.
+    ///
+    /// Nil when the row is not something with text in it, which is what
+    /// tells the pad's hotkey to behave as it does everywhere else.
+    var selectedTextForScratchPad: String? {
+        guard entries.indices.contains(selectedIndex) else {
+            return nil
+        }
+
+        let text: String
+
+        switch entries[selectedIndex] {
+        case let .history(item):
+            // A picture with words read out of it has something to work on.
+            text = item.plainText.isEmpty ? (item.ocrText ?? "") : item.plainText
+        case let .snippet(_, snippet):
+            text = snippet.content
+        default:
+            return nil
+        }
+
+        return text.isEmpty ? nil : text
     }
 
     private func startKeyMonitor() {

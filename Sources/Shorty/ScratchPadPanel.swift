@@ -40,6 +40,14 @@ final class ScratchPadPanelController: NSObject, ShortyBoxContent, NSTextViewDel
         configure()
     }
 
+    /// Adds text to the pad, after what is already there.
+    ///
+    /// A blank line between, so two things sent over do not run together.
+    func append(_ text: String) {
+        let existing = store.text()
+        store.setText(existing.isEmpty ? text : existing + "\n\n" + text)
+    }
+
     // MARK: ShortyBoxContent
 
     var view: NSView {

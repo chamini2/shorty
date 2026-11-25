@@ -415,8 +415,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         commandPalettePanel.show()
     }
 
-    /// The pad on its own, rather than stepped into from the command box.
+    /// Puts `text` on the pad and shows it over whatever asked.
+    ///
+    /// Added rather than substituted: the pad holds work in progress, and an
+    /// entry sent to it should not take the place of what is already there.
+    /// Pushed, not opened, so escape goes back to the picker.
+    private func sendToScratchPad(_ text: String) {
+        scratchPadPanel.append(text)
+        box.push(scratchPadPanel)
+    }
+
+    /// One key for the pad, wherever it is pressed.
+    ///
+    /// With the picker open and an entry under the cursor, that entry is
+    /// what the pad should open on; anywhere else the key opens and closes
+    /// the pad as any other hotkey does. Two keys to maintain for one idea
+    /// is one too many.
     private func showScratchPad() {
+        if box.isPresenting(clipboardPickerPanel), let text = clipboardPickerPanel.selectedTextForScratchPad {
+            sendToScratchPad(text)
+            return
+        }
+
         if box.isVisible {
             box.close()
             return
@@ -585,6 +605,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         clipboardPickerPanel.showsLinkPreviews = controller.loadedClipboardSettings.linkPreviewsEnabled
+        clipboardPickerPanel.scratchPadHandler = { [weak self] text in
+            self?.sendToScratchPad(text)
+        }
         let targetApplication = capturedTarget ?? Self.currentPasteTargetApplication()
         clipboardPickerPanel.show(
             mode: mode,
