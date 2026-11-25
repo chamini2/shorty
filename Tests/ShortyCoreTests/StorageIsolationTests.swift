@@ -104,4 +104,22 @@ final class StorageIsolationTests: XCTestCase {
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
+
+    func testTheSweepOnlyTakesFilesItWrote() throws {
+        // Pointed at a directory it shares, the sweep used to delete the
+        // database sitting beside the pictures: everything unreferenced
+        // went, whatever it was. Stored names are the hash of the
+        // contents, so it can recognise its own work.
+        let assets = ClipboardAssetStore(directory: scratch)
+        let orphan = try XCTUnwrap(
+            assets.store(data: Data(repeating: 9, count: 32), type: "public.png", pixelWidth: 1, pixelHeight: 1)
+        )
+        let neighbour = scratch.appendingPathComponent("Shorty.sqlite")
+        try Data([1]).write(to: neighbour)
+
+        assets.removeOrphans(keeping: [])
+
+        XCTAssertNil(assets.data(for: orphan), "an unreferenced picture still goes")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: neighbour.path))
+    }
 }

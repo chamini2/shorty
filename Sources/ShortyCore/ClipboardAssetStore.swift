@@ -119,7 +119,7 @@ public final class ClipboardAssetStore {
 
         let cutoff = Date().addingTimeInterval(-graceSeconds)
 
-        for name in names where !kept.contains(name) {
+        for name in names where !kept.contains(name) && Self.isStoredAsset(name) {
             let fileURL = directory.appendingPathComponent(name)
 
             if graceSeconds > 0,
@@ -131,6 +131,22 @@ public final class ClipboardAssetStore {
 
             try? fileManager.removeItem(at: fileURL)
         }
+    }
+
+    /// Whether a file is one this store wrote.
+    ///
+    /// The sweep deletes what nothing references, so it must recognise its
+    /// own work: pointed at a directory it shares, it would otherwise take
+    /// the database sitting next to the pictures. Stored names are the
+    /// SHA-256 of the contents, so the shape is exact.
+    static func isStoredAsset(_ name: String) -> Bool {
+        let parts = name.split(separator: ".")
+
+        guard parts.count == 2, parts[0].count == 64 else {
+            return false
+        }
+
+        return parts[0].allSatisfy { $0.isHexDigit && !$0.isUppercase }
     }
 
     private static func fileExtension(for type: String) -> String {
