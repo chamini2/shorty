@@ -1,5 +1,44 @@
 import Foundation
 
+/// The apps opened through Shorty, as rows.
+///
+/// Counted as well as dated: an app opened twice a day for a month is one
+/// you want near the top even on a morning you have not reached for it yet.
+struct RecentAppDatabase {
+    let database: ShortyDatabase
+
+    func record(_ path: String, at date: Date = Date()) throws {
+        try database.locked {
+            try database.sqlite.run(
+                """
+                INSERT INTO recent_apps (path, opened_at, opens) VALUES (?, ?, 1)
+                ON CONFLICT(path) DO UPDATE SET
+                    opened_at = excluded.opened_at,
+                    opens = opens + 1
+                """,
+                [.text(path), .real(date.timeIntervalSince1970)]
+            )
+        }
+    }
+
+    /// How often each app has been opened, by path.
+    func opens() throws -> [String: Int] {
+        try database.locked {
+            let rows = try database.sqlite.query("SELECT path, opens FROM recent_apps")
+
+            return Dictionary(
+                uniqueKeysWithValues: rows.compactMap { row in
+                    guard let path = row[0].string, let opens = row[1].int else {
+                        return nil
+                    }
+
+                    return (path, Int(opens))
+                }
+            )
+        }
+    }
+}
+
 /// The files opened through Shorty, as rows.
 ///
 /// "Move it up rather than repeat it" is the whole rule, and it is one

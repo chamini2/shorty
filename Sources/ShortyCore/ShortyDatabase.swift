@@ -118,6 +118,14 @@ public final class ShortyDatabase: @unchecked Sendable {
                 );
 
                 CREATE INDEX IF NOT EXISTS recent_files_by_recency ON recent_files (opened_at DESC);
+
+                CREATE TABLE IF NOT EXISTS recent_apps (
+                    path      TEXT PRIMARY KEY,
+                    opened_at REAL NOT NULL,
+                    opens     INTEGER NOT NULL DEFAULT 1
+                );
+
+                CREATE INDEX IF NOT EXISTS recent_apps_by_recency ON recent_apps (opened_at DESC);
                 """
             )
 

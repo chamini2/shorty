@@ -54,6 +54,8 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     /// The apps installed on the machine, supplied by the app so the scan is
     /// shared and kept between openings.
     var applications: [InstalledApplication] = []
+    /// How often each app has been opened, which lifts the ones you use.
+    var applicationOpens: [String: Int] = [:]
 
     convenience init(box: ShortyBoxController) {
         self.init(box: box, listEntries: nil, title: nil, symbolName: nil)
@@ -308,7 +310,8 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
                 history: history,
                 keepAwake: keepAwake,
                 screenCount: NSScreen.screens.count,
-                applications: applications
+                applications: applications,
+                applicationOpens: applicationOpens
             )
         }
 
@@ -481,7 +484,16 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     private static func modified(_ action: CommandAction) -> CommandAction {
         let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-        guard case let .openFile(path) = action else {
+        // An app is a file too: showing one in Finder or taking its path is
+        // the same question asked of a different row.
+        let path: String
+
+        switch action {
+        case let .openFile(file):
+            path = file
+        case let .openApplication(bundle):
+            path = bundle
+        default:
             return action
         }
 
@@ -587,6 +599,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             list.settings = settings
             list.history = history
             list.applications = applications
+            list.applicationOpens = applicationOpens
             list.actionHandler = actionHandler
             list.pickerRequestHandler = pickerRequestHandler
             list.viewProvider = viewProvider

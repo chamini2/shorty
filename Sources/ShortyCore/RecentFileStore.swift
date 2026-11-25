@@ -1,5 +1,25 @@
 import Foundation
 
+/// How often each app has been opened through Shorty.
+///
+/// The list of apps is alphabetical, which is predictable but puts the six
+/// you actually launch wherever their names fall. This is what lifts them.
+public final class RecentAppStore {
+    private let apps: RecentAppDatabase?
+
+    public init(database: ShortyDatabase? = .shared) {
+        apps = database.map { RecentAppDatabase(database: $0) }
+    }
+
+    public func record(_ path: String) {
+        try? apps?.record(path)
+    }
+
+    public func opens() -> [String: Int] {
+        (try? apps?.opens()) ?? [:]
+    }
+}
+
 /// The files opened through Shorty, newest first.
 ///
 /// Spotlight knows what the machine opened, but not what you reached for

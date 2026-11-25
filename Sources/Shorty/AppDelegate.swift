@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var clipboardPickerPanel = ClipboardPickerPanelController(box: box)
     private let applicationIndex = ApplicationIndex()
     private let recentFiles = RecentFileStore()
+    private let recentApps = RecentAppStore()
     private var presentedPickerKind: ClipboardMenuKind?
     private var commandPaletteTargetApplication: NSRunningApplication?
     private lazy var commandPalettePanel = CommandPalettePanelController(box: box)
@@ -329,6 +330,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pasteboard.setString(path, forType: .string)
 
         case let .openApplication(path):
+            recentApps.record(path)
             // Through `NSWorkspace`, so an app already running is brought
             // forward instead of started a second time.
             NSWorkspace.shared.openApplication(
@@ -390,6 +392,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         commandPalettePanel.history = controller.recentClipboardItems()
         commandPalettePanel.keepAwake = controller.isKeepAwakeActive
         commandPalettePanel.applications = applicationIndex.current()
+        commandPalettePanel.applicationOpens = recentApps.opens()
         box.boundHotKeys = controller.boundHotKeys
         commandPalettePanel.show()
     }

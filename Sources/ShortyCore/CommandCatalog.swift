@@ -159,6 +159,7 @@ public enum CommandCatalog {
         keepAwake: Bool = false,
         screenCount: Int = 1,
         applications: [InstalledApplication] = [],
+        applicationOpens: [String: Int] = [:],
         transformers: [CommandTransformer] = CommandTransformerEngine.defaultTransformers
     ) -> [CommandEntry] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -170,7 +171,8 @@ public enum CommandCatalog {
             snippetGroups: snippetGroups,
             keepAwake: keepAwake,
             screenCount: screenCount,
-            applications: applications
+            applications: applications,
+            applicationOpens: applicationOpens
         )
 
         return resultEntries(
@@ -286,14 +288,15 @@ public enum CommandCatalog {
         snippetGroups: [SnippetGroup],
         keepAwake: Bool,
         screenCount: Int,
-        applications: [InstalledApplication] = []
+        applications: [InstalledApplication] = [],
+        applicationOpens: [String: Int] = [:]
     ) -> [CommandEntry] {
         [
             CommandEntry(
                 id: "applications",
                 title: "Applications",
                 detail: applications.isEmpty ? "None found" : "\(applications.count) installed",
-                destination: .list(applicationEntries(applications)),
+                destination: .list(applicationEntries(applications, opens: applicationOpens)),
                 keywords: ["app", "apps", "open", "launch", "run"]
             ),
             CommandEntry(
@@ -336,8 +339,22 @@ public enum CommandCatalog {
 
     /// One row per app, labelled with where it was found so two apps of the
     /// same name can be told apart.
-    private static func applicationEntries(_ applications: [InstalledApplication]) -> [CommandEntry] {
-        applications.map { application in
+    private static func applicationEntries(
+        _ applications: [InstalledApplication],
+        opens: [String: Int] = [:]
+    ) -> [CommandEntry] {
+        // The ones you open, most used first; everything else keeps its
+        // alphabetical place underneath.
+        let ordered = applications.sorted { left, right in
+            let leftOpens = opens[left.path] ?? 0
+            let rightOpens = opens[right.path] ?? 0
+
+            return leftOpens == rightOpens
+                ? left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
+                : leftOpens > rightOpens
+        }
+
+        return ordered.map { application in
             CommandEntry(
                 id: application.id,
                 title: application.name,
