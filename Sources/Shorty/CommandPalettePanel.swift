@@ -110,6 +110,9 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         }
 
         searchField.stringValue = ""
+        // Clearing the box means clearing it: offering the same text back on
+        // the next opening is the one thing escape was asked not to do.
+        forgetLastRun()
         updateResults()
         return true
     }
@@ -118,8 +121,9 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         // Opens with the last thing you ran, selected, so the same command can
         // be repeated with the hotkey and return alone. Typing replaces it,
         // since the text comes up selected.
-        searchField.stringValue = lastRunQuery
-        selectedEntryIDBeforePush = lastRunEntryID
+        let offered = offeredAgain()
+        searchField.stringValue = offered?.query ?? ""
+        selectedEntryIDBeforePush = offered?.entryID
         selectionRangeAfterRefocus = nil
         updateHeader()
         updateResults()
@@ -477,14 +481,6 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     private static func modified(_ action: CommandAction) -> CommandAction {
         let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-        // Shift on a cascade parks the window you are in: whichever window
-        // that is, the rest stack up behind it.
-        if case let .moveWindow(.cascade(options)) = action, flags.contains(.shift) {
-            return .moveWindow(
-                .cascade(WindowCascadeOptions(scope: options.scope, keepsFocused: true))
-            )
-        }
-
         guard case let .openFile(path) = action else {
             return action
         }
@@ -533,10 +529,31 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     /// root list, which is the one `show()` presents.
     private var lastRunQuery = ""
     private var lastRunEntryID: String?
+    private var lastRunAt: Date?
+    /// Long enough to repeat a command, short enough that the box is empty
+    /// when you come back to it for something else: what you ran before
+    /// lunch is not what you are opening it for now.
+    private static let lastRunLifetime: TimeInterval = 10 * 60
 
     private func rememberForNextTime(_ entry: CommandEntry) {
         lastRunQuery = searchField.stringValue
         lastRunEntryID = entry.id
+        lastRunAt = Date()
+    }
+
+    private func forgetLastRun() {
+        lastRunQuery = ""
+        lastRunEntryID = nil
+        lastRunAt = nil
+    }
+
+    /// What was run last, while it is still recent enough to want again.
+    private func offeredAgain(now: Date = Date()) -> (query: String, entryID: String?)? {
+        guard let lastRunAt, now.timeIntervalSince(lastRunAt) < Self.lastRunLifetime else {
+            return nil
+        }
+
+        return (lastRunQuery, lastRunEntryID)
     }
 
     private func restoreSelectionAfterReturn() {

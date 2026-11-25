@@ -74,11 +74,11 @@ final class WindowCascadeTests: XCTestCase {
 
         XCTAssertEqual(
             moves.first { $0.title == "Cascade Windows" }?.action,
-            .moveWindow(.cascade(WindowCascadeOptions(scope: .space)))
+            .moveWindow(.cascade(.space))
         )
         XCTAssertEqual(
             moves.first { $0.title == "Cascade App Windows" }?.action,
-            .moveWindow(.cascade(WindowCascadeOptions(scope: .application)))
+            .moveWindow(.cascade(.application))
         )
     }
 }

@@ -97,7 +97,7 @@ Rectangle-style hotkeys for the focused window:
 | `ctrl+option+left` | Left half of the current monitor. If already there, right half of the monitor to the left (wraps). |
 | `ctrl+option+right` | Right half of the current monitor. If already there, left half of the monitor to the right (wraps). |
 | `ctrl+option+cmd+up` | Maximize to the current monitor |
-| _(cascade rows)_ | `return` stacks every window on this desktop, each one down and right of the last, keeping the one you are in at the front. `shift+return` leaves that window where it is and stacks the rest out from its corner |
+| _(cascade rows)_ | Stacks the windows on this desktop, or just the focused app's, each one down and right of the last. The window you are in stays exactly where it is and the rest flow out from its corner |
 | _(unbound)_ | `almost-maximize`: nine tenths of the monitor, centred |
 | `ctrl+option+cmd+left` | Move to the monitor on the left, keeping proportional position and size (wraps) |
 | `ctrl+option+cmd+right` | Move to the monitor on the right, keeping proportional position and size (wraps) |

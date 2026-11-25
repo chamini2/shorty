@@ -395,18 +395,16 @@ public enum CommandCatalog {
             windowEntry(
                 "cascade",
                 "Cascade Windows",
-                .cascade(WindowCascadeOptions(scope: .space)),
-                ["stack", "arrange", "tile", "all", "desktop", "space", "overlap"],
-                detail: "shift ⏎ stacks the rest around this one"
+                .cascade(.space),
+                ["stack", "arrange", "tile", "all", "desktop", "space", "overlap"]
             )
         )
         entries.append(
             windowEntry(
                 "cascade-app",
                 "Cascade App Windows",
-                .cascade(WindowCascadeOptions(scope: .application)),
-                ["stack", "arrange", "app", "same", "application"],
-                detail: "shift ⏎ stacks the rest around this one"
+                .cascade(.application),
+                ["stack", "arrange", "app", "same", "application"]
             )
         )
         entries.append(
