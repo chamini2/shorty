@@ -21,7 +21,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     private let box: ShortyBoxController
     private let contentView = NSView()
     private let header = ShortyBoxHeaderView()
-    private var searchField: ShortyBoxSearchField { header.searchField }
+    private var searchField: NSTextField { header.searchField }
     private let stackView = NSStackView()
     private let scrollView = ShortyScrollView()
     private let listContainer = CommandPaletteListContainerView()
@@ -95,14 +95,32 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     }
 
     func boxDidPresent(in window: NSWindow) {
+        isPresentingNestedPicker = false
         window.makeFirstResponder(searchField)
         updateHeader()
         updateResults()
         restoreSelectionAfterReturn()
     }
 
-    func boxHandlesKey(_ event: NSEvent) -> Bool {
-        handlePanelKeyEvent(event)
+    func boxDidDismiss() {
+        isPresentingNestedPicker = false
+        pendingInsertionRange = nil
+    }
+
+    func boxPerformsKeyEquivalent(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        if flags == [.command, .shift], UInt32(event.keyCode) == UInt32(kVK_ANSI_V) {
+            requestNestedPicker(.combined)
+            return true
+        }
+
+        if flags == .command || flags == [.command, .shift], UInt32(event.keyCode) == UInt32(kVK_ANSI_B) {
+            requestNestedPicker(.snippets)
+            return true
+        }
+
+        return false
     }
 
     /// Escape clears what you typed first, and only then goes back a level.
@@ -143,23 +161,29 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     }
 
     func insertTextFromPicker(_ text: String) {
+        isPresentingNestedPicker = false
         replaceSelectedText(with: text, fallbackRange: pendingInsertionRange)
         pendingInsertionRange = nil
-        refocusAfterNestedPicker()
+        resizePanel()
+        if let selectionRangeAfterRefocus {
+            setSelectedRange(selectionRangeAfterRefocus)
+            self.selectionRangeAfterRefocus = nil
+        }
     }
 
     func cancelNestedPicker() {
+        isPresentingNestedPicker = false
         pendingInsertionRange = nil
-        refocusAfterNestedPicker()
     }
 
     func requestNestedPickerFromHotKey(_ kind: ClipboardMenuKind) -> Bool {
-        if isPresentingNestedPicker {
-            return true
+        guard isPresented else {
+            isPresentingNestedPicker = false
+            return false
         }
 
-        guard isPresented else {
-            return false
+        if isPresentingNestedPicker {
+            return true
         }
 
         requestNestedPicker(kind)
@@ -187,6 +211,27 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
 
         case #selector(NSResponder.moveDown(_:)):
             moveSelection(by: 1)
+            return true
+
+        case #selector(NSResponder.moveRight(_:)):
+            // Anything that goes somewhere opens with right, groups and the
+            // clipboard picker alike. With text to the right of the caret the
+            // key belongs to the search field.
+            guard entries.indices.contains(selectedIndex),
+                  entries[selectedIndex].navigates,
+                  caretIsAtEndOfQuery else {
+                return false
+            }
+
+            activateSelection()
+            return true
+
+        case #selector(NSResponder.moveLeft(_:)):
+            guard box.depth > 1 else {
+                return false
+            }
+
+            box.pop()
             return true
 
         case #selector(NSResponder.cancelOperation(_:)):
@@ -248,9 +293,6 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
 
     private func configureSearchField() {
         searchField.delegate = self
-        searchField.keyHandler = { [weak self] event in
-            self?.handleKeyDown(event) ?? false
-        }
         updateHeader()
     }
 
@@ -660,107 +702,6 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
 
 
 
-    private func handleKeyDown(_ event: NSEvent) -> Bool {
-        if handleCommandKey(event) {
-            return true
-        }
-
-        switch UInt32(event.keyCode) {
-        case UInt32(kVK_Escape):
-            // The box handles escape.
-            return false
-
-        case UInt32(kVK_Return), UInt32(kVK_ANSI_KeypadEnter):
-            activateSelection()
-            return true
-
-        case UInt32(kVK_UpArrow):
-            moveSelection(by: -1)
-            return true
-
-        case UInt32(kVK_DownArrow):
-            moveSelection(by: 1)
-            return true
-
-        case UInt32(kVK_RightArrow):
-            // Anything that goes somewhere opens with right, groups and the
-            // clipboard picker alike. With text to the right of the caret the
-            // key belongs to the search field.
-            guard entries.indices.contains(selectedIndex),
-                  entries[selectedIndex].navigates,
-                  caretIsAtEndOfQuery else {
-                return false
-            }
-
-            activateSelection()
-            return true
-
-        case UInt32(kVK_LeftArrow):
-            guard box.depth > 1 else {
-                return false
-            }
-
-            box.pop()
-            return true
-
-        default:
-            return false
-        }
-    }
-
-    private func handleCommandKey(_ event: NSEvent) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard flags.contains(.command) else {
-            return false
-        }
-
-        switch UInt32(event.keyCode) {
-        case UInt32(kVK_ANSI_A):
-            searchField.selectText(nil)
-            return true
-
-        case UInt32(kVK_ANSI_C):
-            copySelection()
-            return true
-
-        case UInt32(kVK_ANSI_V):
-            if flags.contains(.shift) {
-                requestNestedPicker(.combined)
-            } else {
-                pasteFromSystemClipboard()
-            }
-            return true
-
-        case UInt32(kVK_ANSI_B):
-            requestNestedPicker(.snippets)
-            return true
-
-        default:
-            return false
-        }
-    }
-
-    private func pasteFromSystemClipboard() {
-        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
-            NSSound.beep()
-            return
-        }
-
-        replaceSelectedText(with: text, fallbackRange: nil)
-    }
-
-    private func copySelection() {
-        let range = selectedRange()
-        let currentValue = searchField.stringValue as NSString
-        guard range.length > 0, NSMaxRange(range) <= currentValue.length else {
-            return
-        }
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(currentValue.substring(with: range), forType: .string)
-    }
-
     private func requestNestedPicker(_ kind: ClipboardMenuKind) {
         guard let pickerRequestHandler else {
             return
@@ -768,7 +709,6 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
 
         pendingInsertionRange = selectedRange()
         isPresentingNestedPicker = true
-        box.suppressesResignKey = true
         pickerRequestHandler(kind)
     }
 
@@ -811,25 +751,6 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
 
         let maxLength = value.length - range.location
         return NSRange(location: range.location, length: min(range.length, maxLength))
-    }
-
-    private func refocusAfterNestedPicker() {
-        isPresentingNestedPicker = false
-        box.suppressesResignKey = false
-        resizePanel()
-        box.pop()
-        if let selectionRangeAfterRefocus {
-            setSelectedRange(selectionRangeAfterRefocus)
-            self.selectionRangeAfterRefocus = nil
-        }
-    }
-
-    private func handlePanelKeyEvent(_ event: NSEvent) -> Bool {
-        guard event.type == .keyDown else {
-            return false
-        }
-
-        return handleKeyDown(event)
     }
 }
 

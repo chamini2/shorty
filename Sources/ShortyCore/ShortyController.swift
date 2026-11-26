@@ -20,11 +20,6 @@ public final class ShortyController {
         get { clipboardMonitor.didCapture }
         set { clipboardMonitor.didCapture = newValue }
     }
-    /// Every combo Shorty answers to, built-in and configured alike.
-    public var boundHotKeys: [KeyCombo] {
-        loadedBindings.boundActions.map(\.hotKey)
-            + loadedShortcuts.flatMap { [$0.hotKey] + $0.aliasHotKeys }
-    }
 
     public private(set) var loadedShortcuts: [LoadedShortcut] = []
     public private(set) var loadedSnippetGroups: [SnippetGroup] = []

@@ -14,11 +14,11 @@ final class ShortyBoxHeaderView: NSView {
         static let fontSize: CGFloat = 17
     }
 
-    let searchField: ShortyBoxSearchField
+    let searchField: NSTextField
 
     private let iconView = NSImageView()
 
-    init(searchField: ShortyBoxSearchField = ShortyBoxSearchField(frame: .zero)) {
+    init(searchField: NSTextField = NSTextField(frame: .zero)) {
         self.searchField = searchField
         super.init(frame: .zero)
 
@@ -67,18 +67,5 @@ final class ShortyBoxHeaderView: NSView {
             searchField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
             searchField.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
-    }
-}
-
-@MainActor
-final class ShortyBoxSearchField: NSTextField {
-    var keyHandler: ((NSEvent) -> Bool)?
-
-    override func keyDown(with event: NSEvent) {
-        if keyHandler?(event) == true {
-            return
-        }
-
-        super.keyDown(with: event)
     }
 }

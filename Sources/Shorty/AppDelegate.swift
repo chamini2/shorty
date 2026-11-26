@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        setupMainMenu()
         setupStatusItem()
         controller.statusHandler = { [weak self] message in
             DispatchQueue.main.async {
@@ -125,6 +126,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clipboardPickerPanel.hide()
         commandPalettePanel.hide()
         controller.stop()
+    }
+
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+        let editMenuItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redoItem = editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        redoItem.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
+        NSApp.mainMenu = mainMenu
     }
 
     private func setupStatusItem() {
@@ -411,7 +429,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         commandPalettePanel.keepAwake = controller.isKeepAwakeActive
         commandPalettePanel.applications = applicationIndex.current()
         commandPalettePanel.applicationOpens = recentApps.opens()
-        box.boundHotKeys = controller.boundHotKeys
         commandPalettePanel.show()
     }
 
@@ -442,7 +459,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        box.boundHotKeys = controller.boundHotKeys
         box.open(scratchPadPanel)
     }
 
@@ -478,6 +494,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             mode: mode,
             history: controller.recentClipboardItems(),
             snippetGroups: controller.currentSnippetGroups(),
+            closesBoxOnSelect: false,
             onSelect: { [weak self] result, _ in
                 self?.commandPalettePanel.insertTextFromPicker(Self.text(for: result))
             },
@@ -485,6 +502,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.commandPalettePanel.cancelNestedPicker()
             }
         )
+        box.push(clipboardPickerPanel)
     }
 
     private static func text(for result: ClipboardPickerResult) -> String {
@@ -586,7 +604,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showClipboardPicker(_ kind: ClipboardMenuKind) {
         prepareClipboardPicker(kind)
-        box.boundHotKeys = controller.boundHotKeys
         box.open(clipboardPickerPanel)
     }
 

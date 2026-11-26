@@ -27,24 +27,10 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         static let iconSize: CGFloat = 16
     }
 
-    private struct HandledKeyEvent {
-        let keyCode: UInt16
-        let timestamp: TimeInterval
-
-        init(_ event: NSEvent) {
-            keyCode = event.keyCode
-            timestamp = event.timestamp
-        }
-
-        func matches(_ event: NSEvent) -> Bool {
-            keyCode == event.keyCode && timestamp == event.timestamp
-        }
-    }
-
     private let box: ShortyBoxController
     private let contentView = NSView()
     private let header = ShortyBoxHeaderView()
-    private var searchField: ShortyBoxSearchField { header.searchField }
+    private var searchField: NSTextField { header.searchField }
     private let tableView = ClipboardPickerTableView()
     private let scrollView = ClipboardPickerScrollView()
     private let detailView = ClipboardPickerDetailView()
@@ -65,10 +51,9 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     private var onSelect: ((ClipboardPickerResult, ClipboardPickerActivationMode) -> Void)?
     private var onCancel: (() -> Void)?
     private var onDelete: ((ClipboardItem) -> Void)?
+    private var closesBoxOnSelect = true
     /// Hands text to the scratch pad and shows it.
     var scratchPadHandler: ((String) -> Void)?
-    private var keyMonitor: Any?
-    private var locallyHandledKeyEvent: HandledKeyEvent?
     private var sourceIconCache: [String: NSImage] = [:]
     private var thumbnailCache: [String: NSImage] = [:]
     private let assetStore = ClipboardAssetStore()
@@ -101,16 +86,26 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     }
 
     func boxDidPresent(in window: NSWindow) {
-        startKeyMonitor()
         window.makeFirstResponder(searchField)
     }
 
-    func boxHandlesKey(_ event: NSEvent) -> Bool {
-        handlePanelKeyEvent(event)
+    func boxPerformsKeyEquivalent(_ event: NSEvent) -> Bool {
+        switch UInt32(event.keyCode) {
+        case UInt32(kVK_Return), UInt32(kVK_ANSI_KeypadEnter):
+            let activationMode = Self.activationMode(event: event)
+            guard activationMode != .standard else {
+                return false
+            }
+
+            activateSelected(activationMode: activationMode)
+            return true
+
+        default:
+            return false
+        }
     }
 
     func boxDidDismiss() {
-        stopKeyMonitor()
         let handler = onCancel
         onSelect = nil
         onCancel = nil
@@ -138,6 +133,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         mode: ClipboardPickerMode,
         history: [ClipboardItem],
         snippetGroups: [SnippetGroup],
+        closesBoxOnSelect: Bool = true,
         onSelect: @escaping (ClipboardPickerResult, ClipboardPickerActivationMode) -> Void,
         onCancel: @escaping () -> Void,
         onDelete: ((ClipboardItem) -> Void)? = nil
@@ -145,6 +141,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         self.mode = mode
         self.history = history
         self.snippetGroups = snippetGroups
+        self.closesBoxOnSelect = closesBoxOnSelect
         self.currentFolder = nil
         self.query = ""
         self.onSelect = onSelect
@@ -240,9 +237,6 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
 
     private func configureSearchField() {
         searchField.delegate = self
-        searchField.keyHandler = { [weak self] event in
-            self?.handleKeyDown(event) ?? false
-        }
         updateHeader()
     }
 
@@ -315,33 +309,17 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     ) -> Bool {
         switch commandSelector {
         case #selector(NSResponder.moveUp(_:)):
-            if consumeLocallyHandledCurrentEvent() {
-                return true
-            }
-
             moveSelection(by: -1)
             return true
 
         case #selector(NSResponder.moveDown(_:)):
-            if consumeLocallyHandledCurrentEvent() {
-                return true
-            }
-
             moveSelection(by: 1)
             return true
 
         case #selector(NSResponder.moveLeft(_:)):
-            if consumeLocallyHandledCurrentEvent() {
-                return true
-            }
-
             return leaveFolderIfNeeded()
 
         case #selector(NSResponder.moveRight(_:)):
-            if consumeLocallyHandledCurrentEvent() {
-                return true
-            }
-
             return stepIntoSelected()
 
         case #selector(NSResponder.deleteBackward(_:)),
@@ -350,28 +328,24 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
             // editor must not take a character out of the search box as well.
             // AppKit drops the modifier when it turns a key into a command,
             // so the shift is read back off the event.
-            guard Self.shiftModifierIsActive(event: NSApp.currentEvent) else {
+            if Self.shiftModifierIsActive(event: NSApp.currentEvent) {
+                return deleteSelectedHistoryItem()
+            }
+
+            if !query.isEmpty {
                 return false
             }
 
-            if consumeLocallyHandledCurrentEvent() {
-                return true
-            }
-
-            return deleteSelectedHistoryItem()
+            return leaveFolderIfNeeded()
 
         case #selector(NSResponder.insertNewline(_:)),
             #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
-            if consumeLocallyHandledCurrentEvent() {
-                return true
-            }
-
-            activateSelected(activationMode: Self.activationMode())
+            activateSelected(activationMode: Self.activationMode(event: NSApp.currentEvent))
             return true
 
         case #selector(NSResponder.cancelOperation(_:)):
             // The box handles escape.
-            return consumeLocallyHandledCurrentEvent()
+            return false
 
         default:
             return false
@@ -464,15 +438,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     }
 
 
-    private func handleKeyDown(_ event: NSEvent, consumesLocalDuplicate: Bool = true) -> Bool {
-        if consumesLocalDuplicate, consumeLocallyHandledEvent(event) {
-            return true
-        }
-
-        if forwardEditCommandIfNeeded(event) {
-            return true
-        }
-
+    private func handleKeyDown(_ event: NSEvent) -> Bool {
         switch UInt32(event.keyCode) {
         case UInt32(kVK_Escape):
             // The box handles escape.
@@ -553,98 +519,6 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         }
 
         return text.isEmpty ? nil : text
-    }
-
-    private func startKeyMonitor() {
-        stopKeyMonitor()
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.handleLocalKeyDown(event) ?? event
-        }
-    }
-
-    private func stopKeyMonitor() {
-        if let keyMonitor {
-            NSEvent.removeMonitor(keyMonitor)
-            self.keyMonitor = nil
-        }
-    }
-
-    private func handleLocalKeyDown(_ event: NSEvent) -> NSEvent? {
-        if consumeLocallyHandledEvent(event) {
-            return nil
-        }
-
-        guard isPresented,
-              event.window === box.window || NSApp.keyWindow === box.window
-        else {
-            return event
-        }
-
-        guard handleKeyDown(event, consumesLocalDuplicate: false) else {
-            return event
-        }
-
-        locallyHandledKeyEvent = HandledKeyEvent(event)
-        return nil
-    }
-
-    private func consumeLocallyHandledCurrentEvent() -> Bool {
-        guard let event = NSApp.currentEvent else {
-            return false
-        }
-
-        return consumeLocallyHandledEvent(event)
-    }
-
-    /// A menu bar app has no Edit menu, so AppKit never turns `cmd+v` and
-    /// friends into editing actions. Send them to the field editor directly.
-    private func forwardEditCommandIfNeeded(_ event: NSEvent) -> Bool {
-        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-              let key = event.charactersIgnoringModifiers?.lowercased(),
-              let action = Self.editActionsByKey[key] else {
-            return false
-        }
-
-        return NSApp.sendAction(action, to: nil, from: searchField)
-    }
-
-    private static let editActionsByKey: [String: Selector] = [
-        "v": #selector(NSText.paste(_:)),
-        "c": #selector(NSText.copy(_:)),
-        "x": #selector(NSText.cut(_:)),
-        "a": #selector(NSText.selectAll(_:)),
-        "z": Selector(("undo:")),
-    ]
-
-    private func consumeLocallyHandledEvent(_ event: NSEvent) -> Bool {
-        guard locallyHandledKeyEvent?.matches(event) == true else {
-            return false
-        }
-
-        locallyHandledKeyEvent = nil
-        return true
-    }
-
-    private func handlePanelKeyEvent(_ event: NSEvent) -> Bool {
-        guard event.type == .keyDown else {
-            return false
-        }
-
-        switch UInt32(event.keyCode) {
-        case UInt32(kVK_Return), UInt32(kVK_ANSI_KeypadEnter):
-            let activationMode = Self.activationMode(event: event)
-            guard activationMode != .standard else {
-                return false
-            }
-
-            activateSelected(activationMode: activationMode)
-            return true
-
-        default:
-            // Edit keys are forwarded from `handleKeyDown`, which the local key
-            // monitor drives. Doing it here too would paste twice.
-            return false
-        }
     }
 
     fileprivate static func activationMode(event: NSEvent? = nil) -> ClipboardPickerActivationMode {
@@ -827,7 +701,13 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         }
 
         let handler = onSelect
-        box.close()
+        onSelect = nil
+        onCancel = nil
+        if closesBoxOnSelect {
+            box.close()
+        } else {
+            box.pop()
+        }
         handler?(result, activationMode)
     }
 

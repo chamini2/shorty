@@ -66,7 +66,7 @@ final class ScratchPadPanelController: NSObject, ShortyBoxContent, NSTextViewDel
         updateFooter()
     }
 
-    func boxHandlesKey(_ event: NSEvent) -> Bool {
+    func boxPerformsKeyEquivalent(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
         guard event.keyCode == UInt16(kVK_Return) else {
@@ -84,6 +84,15 @@ final class ScratchPadPanelController: NSObject, ShortyBoxContent, NSTextViewDel
         // part that is wanted.
         if flags == [.command, .shift] {
             copyOut(selectionOnly: true)
+            return true
+        }
+
+        return false
+    }
+
+    func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            box.handleEscape()
             return true
         }
 
