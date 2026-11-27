@@ -52,6 +52,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     private var onCancel: (() -> Void)?
     private var onDelete: ((ClipboardItem) -> Void)?
     private var closesBoxOnSelect = true
+    private var savedSelection: NSRange?
     private var sourceIconCache: [String: NSImage] = [:]
     private var thumbnailCache: [String: NSImage] = [:]
     private let assetStore = ClipboardAssetStore()
@@ -89,8 +90,21 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         contentView
     }
 
+    var hasDraft: Bool {
+        !query.isEmpty || currentFolder != nil
+    }
+
     func boxDidPresent(in window: NSWindow) {
         window.makeFirstResponder(searchField)
+    }
+
+    func boxWillSuspend() {
+        savedSelection = selectedRange()
+    }
+
+    func boxDidResume(in window: NSWindow) {
+        window.makeFirstResponder(searchField)
+        restoreCaretAfterResume()
     }
 
     func boxPerformsKeyEquivalent(_ event: NSEvent) -> Bool {
@@ -113,6 +127,10 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         let handler = onCancel
         onSelect = nil
         onCancel = nil
+        currentFolder = nil
+        query = ""
+        searchField.stringValue = ""
+        savedSelection = nil
         handler?()
     }
 
@@ -122,6 +140,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         if !searchField.stringValue.isEmpty {
             searchField.stringValue = ""
             query = ""
+            savedSelection = nil
             applyFilter(resetSelection: true)
             return true
         }
@@ -144,6 +163,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         self.closesBoxOnSelect = closesBoxOnSelect
         self.currentFolder = nil
         self.query = ""
+        self.savedSelection = nil
         self.onSelect = onSelect
         self.onDelete = onDelete
         self.onCancel = onCancel
@@ -153,10 +173,32 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         applyFilter(resetSelection: true)
     }
 
+    func refresh(
+        history: [ClipboardItem],
+        snippetGroups: [SnippetGroup],
+        showsLinkPreviews: Bool
+    ) {
+        self.history = history
+        self.snippetGroups = snippetGroups
+        self.showsLinkPreviews = showsLinkPreviews
+        if let folder = currentFolder {
+            let roots = ClipboardPickerSearch.rootEntries(
+                history: history,
+                snippetGroups: snippetGroups,
+                query: "",
+                mode: mode
+            )
+            currentFolder = roots.compactMap(\.folder).first(where: { $0.id == folder.id })
+        }
+        updateHeader()
+        applyFilter(resetSelection: false)
+    }
+
     func switchMode(_ mode: ClipboardPickerMode) {
         self.mode = mode
         currentFolder = nil
         query = ""
+        savedSelection = nil
         searchField.stringValue = ""
         updateHeader()
         applyFilter(resetSelection: true)
@@ -518,6 +560,30 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         }
 
         return range.location + range.length >= length
+    }
+
+    private func selectedRange() -> NSRange {
+        if let editor = searchField.currentEditor() {
+            return editor.selectedRange
+        }
+
+        return NSRange(location: (searchField.stringValue as NSString).length, length: 0)
+    }
+
+    private func restoreCaretAfterResume() {
+        let value = searchField.stringValue as NSString
+        let fallback = NSRange(location: value.length, length: 0)
+        let candidate = savedSelection ?? fallback
+        savedSelection = nil
+
+        let range: NSRange
+        if candidate.location >= 0, candidate.location <= value.length {
+            range = NSRange(location: candidate.location, length: min(candidate.length, value.length - candidate.location))
+        } else {
+            range = fallback
+        }
+
+        searchField.currentEditor()?.selectedRange = range
     }
 
     /// What is selected, for the scratch pad to open on.

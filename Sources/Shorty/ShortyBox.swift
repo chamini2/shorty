@@ -2,6 +2,13 @@ import AppKit
 import Carbon
 import ShortyCore
 
+enum ShortyBoxSession: Hashable {
+    case commandBox
+    case clipboard
+    case snippets
+    case scratchPad
+}
+
 enum ClipboardPickerPurpose: Equatable {
     case paste
     case insert
@@ -22,10 +29,18 @@ enum ShortyBoxRoute: Equatable {
 protocol ShortyBoxContent: AnyObject {
     var route: ShortyBoxRoute { get }
     var view: NSView { get }
+    /// Whether this view holds an unsubmitted draft worth keeping across hide/reopen.
+    var hasDraft: Bool { get }
 
-    /// Called before the content is shown, so it can refresh and focus.
+    /// Called before the content is shown fresh, so it can refresh and focus.
     func boxWillPresent()
     func boxDidPresent(in window: NSWindow)
+    /// Called before the box hides or another view is pushed over this one,
+    /// while the field editor is still active so caret/selection can be saved.
+    func boxWillSuspend()
+    /// Called when returning to an already-created view (via resume or pop),
+    /// preserving its search text and caret position.
+    func boxDidResume(in window: NSWindow)
     /// Return true when the content handled a command-modified key equivalent.
     func boxPerformsKeyEquivalent(_ event: NSEvent) -> Bool
     /// Return true to deal with escape internally, such as leaving a folder,
@@ -36,7 +51,10 @@ protocol ShortyBoxContent: AnyObject {
 }
 
 extension ShortyBoxContent {
+    var hasDraft: Bool { false }
     func boxWillPresent() {}
+    func boxWillSuspend() {}
+    func boxDidResume(in window: NSWindow) { boxDidPresent(in: window) }
     func boxDidDismiss() {}
     func boxPerformsKeyEquivalent(_ event: NSEvent) -> Bool { false }
     func boxHandlesEscape() -> Bool { false }
@@ -58,13 +76,23 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         static let tintOpacity: CGFloat = 0.45
     }
 
+    private struct SuspendedSession {
+        let stack: [ShortyBoxContent]
+        let suspendedAt: Date
+    }
+
+    /// How long an unsubmitted draft stack survives after hiding.
+    private static let draftLifetime: TimeInterval = 10 * 60
+
     private let panel: ShortyBoxPanel
     /// Frosted rather than flat: the box floats over whatever it was opened
     /// on top of, and letting that show through says so.
     private let container = NSVisualEffectView()
     /// Sits over the frosted material to give the text some contrast.
     private let tint = NSView()
+    private(set) var activeSession: ShortyBoxSession?
     private var stack: [ShortyBoxContent] = []
+    private var suspendedSessions: [ShortyBoxSession: SuspendedSession] = [:]
 
     override init() {
         panel = ShortyBoxPanel(
@@ -106,28 +134,73 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         panel.isVisible && stack.last === content
     }
 
-    /// Shows `content` as the only thing on the stack, opening the box.
-    /// Runs `prepare` after dismissing the previous stack so reused content
-    /// controllers do not have their fresh state wiped by their own dismissal.
-    func open(_ content: ShortyBoxContent, prepare: () -> Void = {}) {
-        let dismissed = stack.reversed()
-        stack = []
-        dismissed.forEach { $0.boxDidDismiss() }
+    /// Starts a fresh session with `content` as the only item on the stack.
+    /// Suspends any other active session in-place so its unsubmitted draft
+    /// survives switching hotkeys, and releases `content` from any suspended
+    /// session before running `prepare`.
+    func open(
+        session: ShortyBoxSession,
+        content: ShortyBoxContent,
+        prepare: () -> Void = {}
+    ) {
+        if let current = activeSession, !stack.isEmpty {
+            if current == session {
+                dismissActiveStack()
+            } else {
+                parkActiveStack(orderOut: false)
+            }
+        }
+
+        dropSuspended(session: session)
+        releaseFromSuspendedSessions(content)
         prepare()
-        push(content)
+        activeSession = session
+        stack = [content]
+        install(content, resuming: false)
+    }
+
+    /// Restores a suspended session if one exists and has not expired.
+    @discardableResult
+    func resume(
+        session: ShortyBoxSession,
+        refresh: ([ShortyBoxContent]) -> Void = { _ in }
+    ) -> Bool {
+        evictExpiredSessions()
+
+        guard let saved = suspendedSessions.removeValue(forKey: session),
+              let top = saved.stack.last else {
+            return false
+        }
+
+        if let current = activeSession, !stack.isEmpty {
+            if current == session {
+                dismissActiveStack()
+            } else {
+                parkActiveStack(orderOut: false)
+            }
+        }
+
+        activeSession = session
+        stack = saved.stack
+        refresh(stack)
+        install(top, resuming: true)
+        return true
     }
 
     /// Shows `content` above what is already there, keeping the window as is.
-    func push(_ content: ShortyBoxContent) {
+    func push(_ content: ShortyBoxContent, prepare: () -> Void = {}) {
         guard !stack.contains(where: { $0 === content }) else {
             return
         }
 
+        releaseFromSuspendedSessions(content)
+        stack.last?.boxWillSuspend()
+        prepare()
         stack.append(content)
-        install(content)
+        install(content, resuming: false)
     }
 
-    /// Goes back one level, closing the box when nothing is left.
+    /// Goes back one level, closing the session when nothing is left.
     @discardableResult
     func pop() -> Bool {
         guard !stack.isEmpty else {
@@ -141,14 +214,32 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
             return false
         }
 
-        install(previous)
+        install(previous, resuming: true)
         return true
     }
 
+    /// Hides the box while preserving an unsubmitted stack/draft for resume.
+    func suspend() {
+        parkActiveStack(orderOut: true)
+    }
+
+    /// Completes or abandons the active session and clears its stack.
     func close() {
-        let dismissed = stack.reversed()
-        stack = []
-        dismissed.forEach { $0.boxDidDismiss() }
+        if let session = activeSession {
+            dropSuspended(session: session)
+        }
+        dismissActiveStack()
+        panel.orderOut(nil)
+    }
+
+    /// Dismisses the active session and every suspended draft (e.g. on quit).
+    func closeAll() {
+        dismissActiveStack()
+        let sessions = suspendedSessions.values
+        suspendedSessions.removeAll()
+        for session in sessions {
+            session.stack.reversed().forEach { $0.boxDidDismiss() }
+        }
         panel.orderOut(nil)
     }
 
@@ -165,7 +256,7 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
             return
         }
 
-        close()
+        suspend()
     }
 
     @objc
@@ -174,12 +265,83 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
             return
         }
 
-        close()
+        suspend()
     }
 
-    private func install(_ content: ShortyBoxContent) {
+    private func parkActiveStack(orderOut: Bool) {
+        if let session = activeSession, !stack.isEmpty {
+            stack.last?.boxWillSuspend()
+            let shouldKeep = stack.count > 1 || stack.contains(where: \.hasDraft)
+            if shouldKeep {
+                suspendedSessions[session] = SuspendedSession(stack: stack, suspendedAt: Date())
+                stack = []
+                activeSession = nil
+            } else {
+                dismissActiveStack()
+            }
+        }
+
+        if orderOut {
+            panel.orderOut(nil)
+        }
+    }
+
+    private func dismissActiveStack() {
+        let dismissed = stack.reversed()
+        stack = []
+        activeSession = nil
+        dismissed.forEach { $0.boxDidDismiss() }
+    }
+
+    private func dropSuspended(session: ShortyBoxSession) {
+        guard let saved = suspendedSessions.removeValue(forKey: session) else {
+            return
+        }
+
+        saved.stack.reversed().forEach { $0.boxDidDismiss() }
+    }
+
+    /// If another suspended session holds a shared controller instance (such as
+    /// a nested clipboard picker), trim from that point upward so the parent
+    /// draft stays intact without aliasing the reused controller.
+    private func releaseFromSuspendedSessions(_ content: ShortyBoxContent) {
+        for (session, saved) in suspendedSessions {
+            guard let index = saved.stack.firstIndex(where: { $0 === content }) else {
+                continue
+            }
+
+            let kept = Array(saved.stack[..<index])
+            let trimmed = saved.stack[index...].reversed()
+
+            if kept.isEmpty {
+                suspendedSessions.removeValue(forKey: session)
+            } else {
+                suspendedSessions[session] = SuspendedSession(
+                    stack: kept,
+                    suspendedAt: saved.suspendedAt
+                )
+            }
+
+            trimmed.forEach { $0.boxDidDismiss() }
+        }
+    }
+
+    private func evictExpiredSessions(now: Date = Date()) {
+        for (session, saved) in suspendedSessions {
+            guard now.timeIntervalSince(saved.suspendedAt) >= Self.draftLifetime else {
+                continue
+            }
+
+            suspendedSessions.removeValue(forKey: session)
+            saved.stack.reversed().forEach { $0.boxDidDismiss() }
+        }
+    }
+
+    private func install(_ content: ShortyBoxContent, resuming: Bool) {
         let wasVisible = panel.isVisible
-        content.boxWillPresent()
+        if !resuming {
+            content.boxWillPresent()
+        }
 
         // Everything but the tint, which belongs to the box rather than to
         // whatever it is showing.
@@ -206,7 +368,11 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
             takeFocus()
         }
 
-        content.boxDidPresent(in: panel)
+        if resuming {
+            content.boxDidResume(in: panel)
+        } else {
+            content.boxDidPresent(in: panel)
+        }
     }
 
     /// Brings the box forward and gives it key focus without activating Shorty.

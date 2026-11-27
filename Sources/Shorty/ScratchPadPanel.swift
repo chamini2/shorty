@@ -31,6 +31,7 @@ final class ScratchPadPanelController: NSObject, ShortyBoxContent, NSTextViewDel
     /// Set while copying out, so the pasteboard poll's own recording is not
     /// mistaken for a change made here.
     var copyHandler: ((String) -> Void)?
+    private var savedSelection: NSRange?
 
     init(box: ShortyBoxController, store: ScratchPadStore = ScratchPadStore()) {
         self.box = box
@@ -58,6 +59,10 @@ final class ScratchPadPanelController: NSObject, ShortyBoxContent, NSTextViewDel
         contentView
     }
 
+    var hasDraft: Bool {
+        !textView.string.isEmpty
+    }
+
     func boxWillPresent() {
         textView.string = store.text()
     }
@@ -66,7 +71,29 @@ final class ScratchPadPanelController: NSObject, ShortyBoxContent, NSTextViewDel
         window.makeFirstResponder(textView)
         // At the end, where writing continues from, rather than selecting
         // everything and making the first keystroke a deletion.
-        textView.setSelectedRange(NSRange(location: textView.string.count, length: 0))
+        let end = (textView.string as NSString).length
+        textView.setSelectedRange(NSRange(location: end, length: 0))
+        updateFooter()
+    }
+
+    func boxWillSuspend() {
+        save()
+        savedSelection = textView.selectedRange()
+    }
+
+    func boxDidResume(in window: NSWindow) {
+        textView.string = store.text()
+        window.makeFirstResponder(textView)
+        let length = (textView.string as NSString).length
+        let candidate = savedSelection ?? NSRange(location: length, length: 0)
+        savedSelection = nil
+        let range: NSRange
+        if candidate.location >= 0, candidate.location <= length {
+            range = NSRange(location: candidate.location, length: min(candidate.length, length - candidate.location))
+        } else {
+            range = NSRange(location: length, length: 0)
+        }
+        textView.setSelectedRange(range)
         updateFooter()
     }
 
@@ -113,6 +140,7 @@ final class ScratchPadPanelController: NSObject, ShortyBoxContent, NSTextViewDel
 
     func boxDidDismiss() {
         save()
+        savedSelection = nil
     }
 
     // MARK: Editing

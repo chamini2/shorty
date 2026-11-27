@@ -41,11 +41,12 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     private let fileSearcher = FileSearcher()
     private let recentFiles = RecentFileStore()
     private var pendingInsertionRange: NSRange?
+    private var savedSelection: NSRange?
     private var selectionRangeAfterRefocus: NSRange?
     var pickerRequestHandler: ((ClipboardMenuKind, CommandPalettePanelController) -> Void)?
     var actionHandler: ((CommandAction) -> Void)?
-    /// Supplies the bespoke views a list cannot render, such as the picker.
-    var viewProvider: ((CommandViewKind) -> ShortyBoxContent?)?
+    /// Presents the bespoke views a list cannot render, such as the picker.
+    var viewPresenter: ((CommandViewKind) -> Bool)?
     var settings: CommandBoxSettings = .default
     /// Only the entry count is shown; the picker does the browsing.
     var history: [ClipboardItem] = []
@@ -105,15 +106,34 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         contentView
     }
 
+    var hasDraft: Bool {
+        !searchField.stringValue.isEmpty
+    }
+
     func boxDidPresent(in window: NSWindow) {
         window.makeFirstResponder(searchField)
         updateHeader()
         updateResults()
+    }
+
+    func boxWillSuspend() {
+        savedSelection = selectedRange()
+    }
+
+    func boxDidResume(in window: NSWindow) {
+        window.makeFirstResponder(searchField)
+        updateHeader()
+        updateResults(resetSelection: false)
         restoreSelectionAfterReturn()
+        restoreCaretAfterResume()
     }
 
     func boxDidDismiss() {
+        fileSearcher.cancel()
+        searchField.stringValue = ""
         pendingInsertionRange = nil
+        savedSelection = nil
+        selectedEntryIDBeforePush = nil
     }
 
     func boxPerformsKeyEquivalent(_ event: NSEvent) -> Bool {
@@ -139,27 +159,21 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         }
 
         searchField.stringValue = ""
-        // Clearing the box means clearing it: offering the same text back on
-        // the next opening is the one thing escape was asked not to do.
-        forgetLastRun()
+        savedSelection = nil
         updateResults()
         return true
     }
 
     func show() {
-        // Opens with the last thing you ran, selected, so the same command can
-        // be repeated with the hotkey and return alone. Typing replaces it,
-        // since the text comes up selected.
-        let offered = offeredAgain()
-        box.open(self) {
-            self.searchField.stringValue = offered?.query ?? ""
-            self.selectedEntryIDBeforePush = offered?.entryID
+        box.open(session: .commandBox, content: self) {
+            self.searchField.stringValue = ""
+            self.selectedEntryIDBeforePush = nil
+            self.savedSelection = nil
             self.selectionRangeAfterRefocus = nil
             self.updateHeader()
             self.updateResults()
             self.resizePanel()
         }
-        searchField.currentEditor()?.selectAll(nil)
     }
 
     func hide() {
@@ -551,7 +565,6 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         if let destination = entry.destination {
             // Coming back should land here, not at the top of the list.
             selectedEntryIDBeforePush = entry.id
-            rememberForNextTime(entry)
             open(destination, from: entry)
             return
         }
@@ -561,7 +574,6 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             return
         }
 
-        rememberForNextTime(entry)
         hide()
         actionHandler?(Self.modified(action))
     }
@@ -569,36 +581,6 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     /// Remembers what was selected while a child list is open, so coming back
     /// lands on the entry you left from rather than the top of the list.
     private var selectedEntryIDBeforePush: String?
-    /// What was run last, to offer again next time the box opens. Held by the
-    /// root list, which is the one `show()` presents.
-    private var lastRunQuery = ""
-    private var lastRunEntryID: String?
-    private var lastRunAt: Date?
-    /// Long enough to repeat a command, short enough that the box is empty
-    /// when you come back to it for something else: what you ran before
-    /// lunch is not what you are opening it for now.
-    private static let lastRunLifetime: TimeInterval = 10 * 60
-
-    private func rememberForNextTime(_ entry: CommandEntry) {
-        lastRunQuery = searchField.stringValue
-        lastRunEntryID = entry.id
-        lastRunAt = Date()
-    }
-
-    private func forgetLastRun() {
-        lastRunQuery = ""
-        lastRunEntryID = nil
-        lastRunAt = nil
-    }
-
-    /// What was run last, while it is still recent enough to want again.
-    private func offeredAgain(now: Date = Date()) -> (query: String, entryID: String?)? {
-        guard let lastRunAt, now.timeIntervalSince(lastRunAt) < Self.lastRunLifetime else {
-            return nil
-        }
-
-        return (lastRunQuery, lastRunEntryID)
-    }
 
     private func restoreSelectionAfterReturn() {
         guard let id = selectedEntryIDBeforePush else {
@@ -617,6 +599,14 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         scrollSelectionIntoView()
     }
 
+    private func restoreCaretAfterResume() {
+        let currentValue = searchField.stringValue as NSString
+        let fallback = NSRange(location: currentValue.length, length: 0)
+        let range = validRange(savedSelection ?? fallback, in: currentValue)
+        savedSelection = nil
+        setSelectedRange(range)
+    }
+
     /// Both kinds of destination push onto the box's stack, so going back is
     /// one rule. A list is rendered here; a view comes from the app.
     private func open(_ destination: CommandDestination, from entry: CommandEntry) {
@@ -632,12 +622,9 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             )
 
         case let .view(kind):
-            guard let content = viewProvider?(kind) else {
+            if viewPresenter?(kind) != true {
                 NSSound.beep()
-                return
             }
-
-            box.push(content)
 
         case let .search(kind):
             box.push(
@@ -670,7 +657,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         list.applicationOpens = applicationOpens
         list.actionHandler = actionHandler
         list.pickerRequestHandler = pickerRequestHandler
-        list.viewProvider = viewProvider
+        list.viewPresenter = viewPresenter
         return list
     }
 

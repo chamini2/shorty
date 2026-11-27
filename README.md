@@ -246,9 +246,10 @@ Typing a timestamp or a size converts it, above the commands:
 | `1.5 gb` (units `b`, `bytes`, `kb`, `mb`, `gb`, `tb`) | The size in every other unit (1024-based) |
 
 Searching is fuzzy and reaches into lists, so `sf` finds `Time › San Francisco`
-and `maxi` finds `Window › Maximize` without opening either first. The box
-reopens on whatever you ran last, with the text selected, so the hotkey and
-`return` repeat it.
+and `maxi` finds `Window › Maximize` without opening either first. Hiding the
+box (by toggling its hotkey or switching to another app) keeps your navigation
+stack, search text, and caret position for 10 minutes so you can pick up where
+you left off; running an action or pressing `escape` all the way out clears it.
 
 The box and the clipboard picker share one window: choosing `Clipboard History`
 swaps the contents rather than opening a second panel, and `escape` comes back.

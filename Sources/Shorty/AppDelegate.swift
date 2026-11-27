@@ -80,20 +80,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.commandPalettePanel.settings = settings
             }
         }
-        commandPalettePanel.viewProvider = { [weak self] kind in
+        commandPalettePanel.viewPresenter = { [weak self] kind in
             guard let self else {
-                return nil
+                return false
             }
 
             switch kind {
             case let .clipboard(menuKind):
-                // Prepared but not presented: the box pushes it, which keeps
-                // escape popping back to the command list.
-                prepareClipboardPicker(menuKind)
-                return clipboardPickerPanel
+                box.push(clipboardPickerPanel) {
+                    self.prepareClipboardPicker(menuKind)
+                }
+                return true
 
             case .scratchPad:
-                return scratchPadPanel
+                box.push(scratchPadPanel)
+                return true
             }
         }
         commandPalettePanel.actionHandler = { [weak self] action in
@@ -117,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        box.close()
+        box.closeAll()
         controller.stop()
     }
 
@@ -407,17 +408,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showCommandPalette() {
-        // Same hotkey closes a command-box session (even when drilled into a
-        // child view); from any other top-level view, switch to the box in-place.
-        if box.rootRoute == .commandRoot {
-            box.close()
+        // Same hotkey suspends a command-box session (keeping the stack and
+        // unsubmitted search text); reopening resumes it or starts fresh.
+        if box.isVisible && box.activeSession == .commandBox {
+            box.suspend()
             return
         }
 
-        commandPalettePanel.history = controller.recentClipboardItems()
-        commandPalettePanel.keepAwake = controller.isKeepAwakeActive
-        commandPalettePanel.applications = applicationIndex.current()
-        commandPalettePanel.applicationOpens = recentApps.opens()
+        if box.resume(session: .commandBox, refresh: { self.refreshResumedStack($0) }) {
+            return
+        }
+
+        refreshCommandPaletteData(commandPalettePanel)
         commandPalettePanel.show()
     }
 
@@ -427,15 +429,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// entry sent to it should not take the place of what is already there.
     /// Pushed, not opened, so escape goes back to the picker.
     private func sendToScratchPad(_ text: String) {
-        scratchPadPanel.append(text)
-        box.push(scratchPadPanel)
+        box.push(scratchPadPanel) {
+            self.scratchPadPanel.append(text)
+        }
     }
 
     /// One key for the pad, wherever it is pressed.
     ///
     /// With the standalone picker open and an entry under the cursor, that
     /// entry is sent to the pad; when the pad is already on top, the hotkey
-    /// closes it; from anywhere else, switch to the pad in-place.
+    /// suspends it; from anywhere else, resume or open the pad in-place.
     private func showScratchPad() {
         if case .clipboard(_, purpose: .paste) = box.topRoute,
            let text = clipboardPickerPanel.selectedTextForScratchPad {
@@ -443,12 +446,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        if box.topRoute == .scratchPad {
-            box.close()
+        if box.isVisible && box.topRoute == .scratchPad {
+            box.suspend()
             return
         }
 
-        box.open(scratchPadPanel)
+        if box.resume(session: .scratchPad, refresh: { self.refreshResumedStack($0) }) {
+            return
+        }
+
+        box.open(session: .scratchPad, content: scratchPadPanel)
     }
 
     private func handleClipboardMenuHotKey(_ kind: ClipboardMenuKind) {
@@ -466,8 +473,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        if box.topRoute == .clipboard(kind, purpose: .paste) {
-            box.close()
+        let session: ShortyBoxSession = kind == .snippets ? .snippets : .clipboard
+        if box.isVisible && box.activeSession == session {
+            box.suspend()
+            return
+        }
+
+        if box.resume(session: session, refresh: { self.refreshResumedStack($0) }) {
             return
         }
 
@@ -478,20 +490,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ kind: ClipboardMenuKind,
         for palette: CommandPalettePanelController
     ) {
-        clipboardPickerPanel.showsLinkPreviews = controller.loadedClipboardSettings.linkPreviewsEnabled
-        clipboardPickerPanel.show(
-            mode: Self.pickerMode(for: kind),
-            history: controller.recentClipboardItems(),
-            snippetGroups: controller.currentSnippetGroups(),
-            closesBoxOnSelect: false,
-            onSelect: { [weak palette] result, _ in
-                palette?.insertTextFromPicker(Self.text(for: result))
-            },
-            onCancel: { [weak palette] in
-                palette?.cancelNestedPicker()
+        box.push(clipboardPickerPanel) {
+            self.clipboardPickerPanel.showsLinkPreviews = self.controller.loadedClipboardSettings.linkPreviewsEnabled
+            self.clipboardPickerPanel.show(
+                mode: Self.pickerMode(for: kind),
+                history: self.controller.recentClipboardItems(),
+                snippetGroups: self.controller.currentSnippetGroups(),
+                closesBoxOnSelect: false,
+                onSelect: { [weak palette] result, _ in
+                    palette?.insertTextFromPicker(Self.text(for: result))
+                },
+                onCancel: { [weak palette] in
+                    palette?.cancelNestedPicker()
+                }
+            )
+        }
+    }
+
+    private func refreshResumedStack(_ stack: [ShortyBoxContent]) {
+        for content in stack {
+            if let palette = content as? CommandPalettePanelController {
+                refreshCommandPaletteData(palette)
+            } else if let picker = content as? ClipboardPickerPanelController {
+                picker.refresh(
+                    history: controller.recentClipboardItems(),
+                    snippetGroups: controller.currentSnippetGroups(),
+                    showsLinkPreviews: controller.loadedClipboardSettings.linkPreviewsEnabled
+                )
             }
-        )
-        box.push(clipboardPickerPanel)
+        }
+    }
+
+    private func refreshCommandPaletteData(_ palette: CommandPalettePanelController) {
+        palette.settings = controller.loadedCommandBox
+        palette.history = controller.recentClipboardItems()
+        palette.keepAwake = controller.isKeepAwakeActive
+        palette.applications = applicationIndex.current()
+        palette.applicationOpens = recentApps.opens()
     }
 
     private static func pickerMode(for kind: ClipboardMenuKind) -> ClipboardPickerMode {
@@ -601,7 +636,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showClipboardPicker(_ kind: ClipboardMenuKind) {
-        box.open(clipboardPickerPanel) {
+        let session: ShortyBoxSession = kind == .snippets ? .snippets : .clipboard
+        box.open(session: session, content: clipboardPickerPanel) {
             self.prepareClipboardPicker(kind)
         }
     }
@@ -660,7 +696,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleWindowSwitcherUpdate(_ update: WindowSwitcherUpdate) {
         switch update {
         case let .show(snapshot):
-            box.close()
+            box.suspend()
             windowSwitcherPanel.show(snapshot)
         case let .update(snapshot):
             windowSwitcherPanel.update(snapshot)
