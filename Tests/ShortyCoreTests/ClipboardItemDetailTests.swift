@@ -43,6 +43,15 @@ final class ClipboardItemDetailTests: XCTestCase {
 
         XCTAssertNil(detail.sourceBundleID)
         XCTAssertFalse(detail.rows.contains { $0.label == "Source" })
+        XCTAssertFalse(detail.rows.contains { $0.label == "Pinned" })
+    }
+
+    func testHistoryDetailIncludesPinnedRowWhenPinned() {
+        let pinnedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let item = ClipboardItem(plainText: "important", updatedAt: pinnedAt, pinnedAt: pinnedAt)
+        let detail = ClipboardItemDetailBuilder.detail(for: item, dateFormatter: fixedFormatter())
+
+        XCTAssertTrue(detail.rows.contains(ClipboardDetailRow(label: "Pinned", value: "2023-11-14 22:13")))
     }
 
     func testDetectsLinkKind() {

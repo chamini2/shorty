@@ -21,9 +21,9 @@ struct ClipboardHistoryDatabase {
                         id, plain_text, rtf, rtfd, created_at, updated_at,
                         source_bundle, source_name,
                         image_file, image_type, image_bytes, image_width, image_height,
-                        ocr_text
+                        ocr_text, pinned_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         plain_text = excluded.plain_text,
                         rtf = excluded.rtf,
@@ -37,7 +37,8 @@ struct ClipboardHistoryDatabase {
                         image_bytes = excluded.image_bytes,
                         image_width = excluded.image_width,
                         image_height = excluded.image_height,
-                        ocr_text = COALESCE(excluded.ocr_text, items.ocr_text)
+                        ocr_text = COALESCE(excluded.ocr_text, items.ocr_text),
+                        pinned_at = COALESCE(excluded.pinned_at, items.pinned_at)
                     """,
                     [
                         .text(item.id),
@@ -54,6 +55,7 @@ struct ClipboardHistoryDatabase {
                         item.image.map { SQLiteValue.integer(Int64($0.pixelWidth)) } ?? .null,
                         item.image.map { SQLiteValue.integer(Int64($0.pixelHeight)) } ?? .null,
                         item.ocrText.map(SQLiteValue.text) ?? .null,
+                        item.pinnedAt.map { SQLiteValue.real($0.timeIntervalSince1970) } ?? .null,
                     ]
                 )
 
@@ -87,10 +89,10 @@ struct ClipboardHistoryDatabase {
     /// Only the two fields that survive a re-copy, rather than the whole
     /// item: this runs on every copy, and rebuilding an entry here means
     /// two more queries for its representations and files.
-    func existing(id: String) throws -> (createdAt: Date, source: ClipboardSource?)? {
+    func existing(id: String) throws -> (createdAt: Date, source: ClipboardSource?, pinnedAt: Date?)? {
         try database.locked {
             let rows = try database.sqlite.query(
-                "SELECT created_at, source_bundle, source_name FROM items WHERE id = ?",
+                "SELECT created_at, source_bundle, source_name, pinned_at FROM items WHERE id = ?",
                 [.text(id)]
             )
 
@@ -101,8 +103,21 @@ struct ClipboardHistoryDatabase {
             let source: ClipboardSource? = (row[1].string == nil && row[2].string == nil)
                 ? nil
                 : ClipboardSource(bundleID: row[1].string, name: row[2].string)
+            let pinnedAt = row[3].double.map(Date.init(timeIntervalSince1970:))
 
-            return (Date(timeIntervalSince1970: row[0].double ?? 0), source)
+            return (Date(timeIntervalSince1970: row[0].double ?? 0), source, pinnedAt)
+        }
+    }
+
+    @discardableResult
+    func setPinned(_ pinned: Bool, id: String, at date: Date = Date()) throws -> Date? {
+        try database.locked {
+            let value: SQLiteValue = pinned ? .real(date.timeIntervalSince1970) : .null
+            let updated = try database.sqlite.run(
+                "UPDATE items SET pinned_at = ? WHERE id = ?",
+                [value, .text(id)]
+            )
+            return pinned && updated > 0 ? date : nil
         }
     }
 
@@ -147,23 +162,37 @@ struct ClipboardHistoryDatabase {
         }
     }
 
-    /// The newest entries, which is the order the picker shows.
+    /// Pinned entries (newest pinned first), followed by up to `limit` newest
+    /// unpinned entries. Pinned entries always load regardless of `limit`.
     func recentItems(limit: Int) throws -> [ClipboardItem] {
         try database.locked {
-            let rows = try database.sqlite.query(
+            let pinnedRows = try database.sqlite.query(
                 """
                 SELECT id, plain_text, rtf, rtfd, created_at, updated_at,
                        source_bundle, source_name,
                        image_file, image_type, image_bytes, image_width, image_height,
-                       ocr_text
+                       ocr_text, pinned_at
                 FROM items
+                WHERE pinned_at IS NOT NULL
+                ORDER BY pinned_at DESC
+                """
+            )
+
+            let recentRows = try database.sqlite.query(
+                """
+                SELECT id, plain_text, rtf, rtfd, created_at, updated_at,
+                       source_bundle, source_name,
+                       image_file, image_type, image_bytes, image_width, image_height,
+                       ocr_text, pinned_at
+                FROM items
+                WHERE pinned_at IS NULL
                 ORDER BY updated_at DESC
                 LIMIT ?
                 """,
                 [.integer(Int64(limit))]
             )
 
-            return try rows.compactMap(item(from:))
+            return try (pinnedRows + recentRows).compactMap(item(from:))
         }
     }
 
@@ -173,7 +202,8 @@ struct ClipboardHistoryDatabase {
         }
     }
 
-    /// Drops everything past the newest `limit`.
+    /// Drops unpinned entries past the newest `limit`. Pinned entries are
+    /// never trimmed by the history limit.
     ///
     /// By date rather than by `id NOT IN (…)`: the subquery form re-sorted
     /// the whole table on every copy, which put the cost back where moving
@@ -183,7 +213,7 @@ struct ClipboardHistoryDatabase {
     func trim(to limit: Int) throws -> Bool {
         try database.locked {
             let cutoff = try database.sqlite.query(
-                "SELECT updated_at FROM items ORDER BY updated_at DESC LIMIT 1 OFFSET ?",
+                "SELECT updated_at FROM items WHERE pinned_at IS NULL ORDER BY updated_at DESC LIMIT 1 OFFSET ?",
                 [.integer(Int64(limit))]
             )
 
@@ -193,7 +223,7 @@ struct ClipboardHistoryDatabase {
             }
 
             let removed = try database.sqlite.run(
-                "DELETE FROM items WHERE updated_at <= ?",
+                "DELETE FROM items WHERE pinned_at IS NULL AND updated_at <= ?",
                 [.real(oldest)]
             )
 
@@ -275,7 +305,8 @@ struct ClipboardHistoryDatabase {
             source: source,
             image: image,
             files: files,
-            ocrText: row.count > 13 ? row[13].string : nil
+            ocrText: row.count > 13 ? row[13].string : nil,
+            pinnedAt: row.count > 14 ? row[14].double.map(Date.init(timeIntervalSince1970:)) : nil
         )
     }
 }

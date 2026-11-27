@@ -119,6 +119,12 @@ public enum ClipboardItemDetailBuilder {
             rows.append(contentsOf: sizeRows(for: item.plainText))
         }
 
+        if let pinnedAt = item.pinnedAt {
+            rows.append(
+                ClipboardDetailRow(label: "Pinned", value: dateFormatter.string(from: pinnedAt))
+            )
+        }
+
         rows.append(
             ClipboardDetailRow(label: "Copied", value: dateFormatter.string(from: item.updatedAt))
         )

@@ -133,6 +133,36 @@ final class ClipboardPickerSearchTests: XCTestCase {
         XCTAssertEqual(entry.presentation.trailingLineCountLabel, "+2")
     }
 
+    func testPinnedItemsAppearInOwnSectionAboveHistory() {
+        let olderPin = ClipboardItem(
+            plainText: "Older pin",
+            pinnedAt: Date(timeIntervalSince1970: 100)
+        )
+        let newerPin = ClipboardItem(
+            plainText: "Newer pin",
+            pinnedAt: Date(timeIntervalSince1970: 200)
+        )
+        let unpinned = ClipboardItem(plainText: "Regular copy")
+
+        let entries = ClipboardPickerSearch.rootEntries(
+            history: [olderPin, unpinned, newerPin],
+            snippetGroups: [],
+            query: "",
+            mode: .all
+        )
+
+        XCTAssertEqual(entries.map(\.title), ["Pinned", "Newer pin", "Older pin", "History", "Regular copy"])
+
+        let filtered = ClipboardPickerSearch.rootEntries(
+            history: [olderPin, unpinned, newerPin],
+            snippetGroups: [],
+            query: "pin",
+            mode: .all
+        )
+
+        XCTAssertEqual(filtered.map(\.title), ["Pinned", "Newer pin", "Older pin"])
+    }
+
     private func onlyHistoryEntry(for text: String) throws -> ClipboardPickerEntry {
         let entries = ClipboardPickerSearch.rootEntries(
             history: [ClipboardItem(plainText: text)],

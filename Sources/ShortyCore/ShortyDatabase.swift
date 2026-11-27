@@ -81,7 +81,8 @@ public final class ShortyDatabase: @unchecked Sendable {
                     image_bytes   INTEGER,
                     image_width   INTEGER,
                     image_height  INTEGER,
-                    ocr_text      TEXT
+                    ocr_text      TEXT,
+                    pinned_at     REAL
                 );
 
                 CREATE INDEX IF NOT EXISTS items_by_recency ON items (updated_at DESC);
@@ -153,6 +154,12 @@ public final class ShortyDatabase: @unchecked Sendable {
         if !existing.contains("ocr_text") {
             try sqlite.execute("ALTER TABLE items ADD COLUMN ocr_text TEXT")
         }
+
+        if !existing.contains("pinned_at") {
+            try sqlite.execute("ALTER TABLE items ADD COLUMN pinned_at REAL")
+        }
+
+        try sqlite.execute("CREATE INDEX IF NOT EXISTS items_by_pinned ON items (pinned_at DESC) WHERE pinned_at IS NOT NULL")
     }
 
     /// A value remembered between launches, by name.

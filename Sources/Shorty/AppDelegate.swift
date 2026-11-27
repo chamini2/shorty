@@ -554,6 +554,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 },
                 onCancel: { [weak palette] in
                     palette?.cancelNestedPicker()
+                },
+                onTogglePin: { [weak self] item in
+                    guard let self else {
+                        return []
+                    }
+                    self.controller.setClipboardItemPinned(!item.isPinned, item: item)
+                    return self.controller.recentClipboardItems()
                 }
             )
         }
@@ -710,6 +717,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             },
             onDelete: { [weak self] item in
                 self?.controller.deleteClipboardItem(item)
+            },
+            onTogglePin: { [weak self] item in
+                guard let self else {
+                    return []
+                }
+                self.controller.setClipboardItemPinned(!item.isPinned, item: item)
+                return self.controller.recentClipboardItems()
             }
         )
     }

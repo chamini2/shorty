@@ -149,12 +149,22 @@ public enum ClipboardPickerSearch {
         }
 
         if mode == .all {
+            let pinnedEntries = rootEntriesMatching(
+                rootPinnedEntries(history),
+                query: normalizedQuery
+            )
+
+            if !pinnedEntries.isEmpty {
+                entries.append(.header("Pinned"))
+                entries.append(contentsOf: pinnedEntries)
+            }
+
             let historyEntries = rootEntriesMatching(
                 rootHistoryEntries(history),
                 query: normalizedQuery
             )
 
-            if !historyEntries.isEmpty || normalizedQuery.isEmpty {
+            if !historyEntries.isEmpty || (normalizedQuery.isEmpty && pinnedEntries.isEmpty) {
                 entries.append(.header("History"))
                 entries.append(contentsOf: historyEntries.isEmpty ? [.empty("No clipboard history")] : historyEntries)
             }
@@ -216,8 +226,16 @@ public enum ClipboardPickerSearch {
         return historyResults + snippetResults
     }
 
+    private static func rootPinnedEntries(_ history: [ClipboardItem]) -> [ClipboardPickerEntry] {
+        history
+            .filter(\.isPinned)
+            .sorted { ($0.pinnedAt ?? .distantPast) > ($1.pinnedAt ?? .distantPast) }
+            .map { ClipboardPickerEntry.history($0) }
+    }
+
     private static func rootHistoryEntries(_ history: [ClipboardItem]) -> [ClipboardPickerEntry] {
         history
+            .filter { !$0.isPinned }
             .prefix(ClipboardConstants.maxVisibleItems)
             .map { ClipboardPickerEntry.history($0) }
     }

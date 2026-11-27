@@ -53,6 +53,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     private var onSelect: ((ClipboardPickerResult, ClipboardPickerActivationMode) -> Void)?
     private var onCancel: (() -> Void)?
     private var onDelete: ((ClipboardItem) -> Void)?
+    private var onTogglePin: ((ClipboardItem) -> [ClipboardItem])?
     private var closesBoxOnSelect = true
     private var savedSelection: NSRange?
     private var sourceIconCache: [String: NSImage] = [:]
@@ -110,6 +111,12 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     }
 
     func boxPerformsKeyEquivalent(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        if flags == .command, UInt32(event.keyCode) == UInt32(kVK_ANSI_P) {
+            return togglePinSelectedHistoryItem()
+        }
+
         switch UInt32(event.keyCode) {
         case UInt32(kVK_Return), UInt32(kVK_ANSI_KeypadEnter):
             let activationMode = Self.activationMode(event: event)
@@ -157,7 +164,8 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         closesBoxOnSelect: Bool = true,
         onSelect: @escaping (ClipboardPickerResult, ClipboardPickerActivationMode) -> Void,
         onCancel: (() -> Void)? = nil,
-        onDelete: ((ClipboardItem) -> Void)? = nil
+        onDelete: ((ClipboardItem) -> Void)? = nil,
+        onTogglePin: ((ClipboardItem) -> [ClipboardItem])? = nil
     ) {
         self.mode = mode
         self.history = history
@@ -168,6 +176,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         self.savedSelection = nil
         self.onSelect = onSelect
         self.onDelete = onDelete
+        self.onTogglePin = onTogglePin
         self.onCancel = onCancel
         searchField.stringValue = ""
         updateHeader()
@@ -327,7 +336,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     private func updateFooter() {
         var parts: [String] = []
         if closesBoxOnSelect {
-            parts = ["↩ paste", "⌘↩ copy", "⌥↩ plain", "⇧↩ join", "⇧⌘E scratch pad", "⇧⌫ delete"]
+            parts = ["↩ paste", "⌘↩ copy", "⌥↩ plain", "⇧↩ join", "⌘P pin", "⇧⌘E pad", "⇧⌫ delete"]
         } else {
             parts = ["↩ insert"]
         }
@@ -785,6 +794,32 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         return true
     }
 
+    /// Pins or unpins the selected history entry and keeps selection on it so
+    /// the user immediately sees where it moved (and can press `⌘P` again to undo).
+    private func togglePinSelectedHistoryItem() -> Bool {
+        guard let onTogglePin,
+              entries.indices.contains(selectedIndex),
+              case let .history(item) = entries[selectedIndex] else {
+            NSSound.beep()
+            return true
+        }
+
+        let targetID = ClipboardPickerEntry.history(item).id
+        let previousIndex = selectedIndex
+        history = onTogglePin(item)
+        applyFilter(resetSelection: true, preferredEntryID: targetID)
+
+        if !entries.indices.contains(selectedIndex) || entries[selectedIndex].id != targetID {
+            selectedIndex = min(previousIndex, entries.indices.last ?? 0)
+            if entries.indices.contains(selectedIndex), !entries[selectedIndex].isSelectable {
+                selectedIndex = firstSelectableIndex() ?? -1
+            }
+            selectCurrentRow()
+        }
+
+        return true
+    }
+
     /// Removes the selected entry from history, keeping the selection where
     /// it was so a run of deletes does not jump about. Snippets come from the
     /// config, so they are not ours to delete.
@@ -862,15 +897,27 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         entries.indices.first { entries[$0].isSelectable }
     }
 
-    /// Opens on the newest history item, leaving the snippets above it one
-    /// `up` away. While filtering, the first match wins whatever section it is
-    /// in, since that is what the query asked for.
+    /// Opens on the newest unpinned history item, leaving pinned items and
+    /// snippets above it one `up` away. While filtering, the first match wins
+    /// whatever section it is in, since that is what the query asked for.
     private func initialSelectionIndex() -> Int? {
         guard query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return firstSelectableIndex()
         }
 
-        let historyIndex = entries.indices.first { index in
+        let unpinnedHistoryIndex = entries.indices.first { index in
+            if case let .history(item) = entries[index], !item.isPinned {
+                return true
+            }
+
+            return false
+        }
+
+        if let unpinnedHistoryIndex {
+            return unpinnedHistoryIndex
+        }
+
+        let anyHistoryIndex = entries.indices.first { index in
             if case .history = entries[index] {
                 return true
             }
@@ -878,7 +925,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
             return false
         }
 
-        return historyIndex ?? firstSelectableIndex()
+        return anyHistoryIndex ?? firstSelectableIndex()
     }
 
     private func selectCurrentRow(anchorContextAbove: Bool = false) {
@@ -916,12 +963,20 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
 
     private func makeCell(for entry: ClipboardPickerEntry) -> NSView {
         let presentation = entry.presentation
+        let isPinned: Bool
+        if case let .history(item) = entry {
+            isPinned = item.isPinned
+        } else {
+            isPinned = false
+        }
+
         return ClipboardPickerCellView(
             title: presentation.title,
             trailingLabel: presentation.trailingLineCountLabel,
             textColor: textColor(for: entry),
             icon: image(for: entry),
             showsDisclosure: showsDisclosure(for: entry),
+            isPinned: isPinned,
             layoutWidthLimit: Metrics.panelWidth
         )
     }
@@ -1055,6 +1110,7 @@ private final class ClipboardPickerCellView: NSTableCellView {
     private let font = NSFont.systemFont(ofSize: 13)
     private let iconView: NSImageView?
     private let showsDisclosure: Bool
+    private let isPinned: Bool
     private let layoutWidthLimit: CGFloat
 
     init(
@@ -1063,12 +1119,14 @@ private final class ClipboardPickerCellView: NSTableCellView {
         textColor: NSColor,
         icon: NSImage?,
         showsDisclosure: Bool,
+        isPinned: Bool,
         layoutWidthLimit: CGFloat
     ) {
         self.title = title
         self.trailingLabel = trailingLabel
         self.textColor = textColor
         self.showsDisclosure = showsDisclosure
+        self.isPinned = isPinned
         self.layoutWidthLimit = layoutWidthLimit
 
         if let icon {
@@ -1089,6 +1147,14 @@ private final class ClipboardPickerCellView: NSTableCellView {
 
     override var isFlipped: Bool {
         true
+    }
+
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet {
+            if isPinned {
+                needsDisplay = true
+            }
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -1137,6 +1203,15 @@ private final class ClipboardPickerCellView: NSTableCellView {
             )
             drawDisclosure(in: rect)
             textEnd = rect.minX - Metrics.disclosureSpacing
+        } else if isPinned {
+            let rect = NSRect(
+                x: layoutWidth - Metrics.disclosureTrailing - Metrics.disclosureSize,
+                y: floor((bounds.height - Metrics.disclosureSize) / 2),
+                width: Metrics.disclosureSize,
+                height: Metrics.disclosureSize
+            )
+            drawPin(in: rect)
+            textEnd = rect.minX - Metrics.disclosureSpacing
         }
 
         let paragraphStyle = NSMutableParagraphStyle()
@@ -1172,6 +1247,36 @@ private final class ClipboardPickerCellView: NSTableCellView {
         NSBezierPath(rect: textRect).setClip()
         renderedTitle.draw(at: textRect.origin, withAttributes: attributes)
         NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func drawPin(in rect: NSRect) {
+        let tint: NSColor = backgroundStyle == .emphasized
+            ? NSColor.white.withAlphaComponent(0.9)
+            : .secondaryLabelColor
+        let configuration = NSImage.SymbolConfiguration(pointSize: 10, weight: .regular)
+            .applying(.init(paletteColors: [tint]))
+        guard let symbol = NSImage(
+            systemSymbolName: "pin.fill",
+            accessibilityDescription: "Pinned"
+        )?.withSymbolConfiguration(configuration) else {
+            return
+        }
+
+        let symbolSize = symbol.size
+        let target = NSRect(
+            x: floor(rect.midX - symbolSize.width / 2),
+            y: floor(rect.midY - symbolSize.height / 2),
+            width: symbolSize.width,
+            height: symbolSize.height
+        )
+        symbol.draw(
+            in: target,
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1,
+            respectFlipped: true,
+            hints: nil
+        )
     }
 
     private func drawDisclosure(in rect: NSRect) {

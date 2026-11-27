@@ -179,6 +179,12 @@ public final class ShortyController {
         return clipboardHistoryStore.remove(id: item.id)
     }
 
+    @discardableResult
+    public func setClipboardItemPinned(_ pinned: Bool, item: ClipboardItem) -> Date? {
+        console.info(pinned ? "Pinning clipboard history item." : "Unpinning clipboard history item.")
+        return clipboardHistoryStore.setPinned(pinned, id: item.id)
+    }
+
     public var isKeepAwakeActive: Bool {
         keepAwake.isActive
     }

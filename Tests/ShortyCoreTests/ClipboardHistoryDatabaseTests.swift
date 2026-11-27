@@ -117,4 +117,34 @@ final class ClipboardHistoryDatabaseTests: XCTestCase {
         XCTAssertEqual(restored.additionalRepresentations.count, 1)
         XCTAssertEqual(restored.files.count, 1)
     }
+
+    func testPinnedItemsSurviveTrimAndRecopyAndLoadAboveRecentLimit() throws {
+        let store = try store(limit: 2)
+        store.addPlainText("one")
+        let pinned = try XCTUnwrap(store.recentItems(limit: 1).first)
+        let pinnedAt = Date(timeIntervalSince1970: 1_700_000_000)
+
+        XCTAssertEqual(store.setPinned(true, id: pinned.id, at: pinnedAt), pinnedAt)
+
+        // Adding more than the limit trims old unpinned items, never pinned ones.
+        store.addPlainText("two")
+        store.addPlainText("three")
+        store.addPlainText("four")
+
+        let items = store.recentItems(limit: 2)
+        XCTAssertEqual(items.map(\.plainText), ["one", "four", "three"])
+        XCTAssertTrue(items[0].isPinned)
+        XCTAssertFalse(items[1].isPinned)
+
+        // Re-copying a pinned item keeps it pinned.
+        store.addPlainText("one")
+        let afterRecopy = try XCTUnwrap(store.recentItems(limit: 2).first { $0.plainText == "one" })
+        XCTAssertTrue(afterRecopy.isPinned)
+
+        // Unpinning returns it to normal trimming.
+        XCTAssertNil(store.setPinned(false, id: pinned.id))
+        let afterUnpin = store.recentItems(limit: 10)
+        XCTAssertEqual(afterUnpin.count, 2)
+        XCTAssertFalse(afterUnpin.contains { $0.isPinned })
+    }
 }

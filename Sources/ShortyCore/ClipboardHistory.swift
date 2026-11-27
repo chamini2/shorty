@@ -110,6 +110,13 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
     public var image: ClipboardAsset?
     /// Files copied in Finder, kept as paths rather than copies.
     public var files: [ClipboardFileReference]
+    /// Set when the user pinned this item so it stays at the top and is never
+    /// trimmed by the history limit. Not part of `id`.
+    public var pinnedAt: Date?
+
+    public var isPinned: Bool {
+        pinnedAt != nil
+    }
 
     public init(
         plainText: String,
@@ -121,11 +128,12 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         source: ClipboardSource? = nil,
         image: ClipboardAsset? = nil,
         files: [ClipboardFileReference] = [],
-        ocrText: String? = nil
+        ocrText: String? = nil,
+        pinnedAt: Date? = nil
     ) {
-        // `ocrText` is not part of the id: it is read out of the picture
-        // after the entry exists, and an identity that changed when the
-        // reading arrived would stop matching the row it was stored under.
+        // `ocrText` and `pinnedAt` are not part of the id: they change after
+        // the entry exists, and an identity that changed with them would stop
+        // matching the row it was stored under.
         self.id = Self.makeID(
             plainText: plainText,
             rtfData: rtfData,
@@ -144,6 +152,7 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         self.source = source
         self.image = image
         self.files = files
+        self.pinnedAt = pinnedAt
     }
 
     /// Text the picker search matches against, including file paths.
@@ -498,6 +507,7 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         case source
         case image
         case files
+        case pinnedAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -514,6 +524,7 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         source = try container.decodeIfPresent(ClipboardSource.self, forKey: .source)
         image = try container.decodeIfPresent(ClipboardAsset.self, forKey: .image)
         files = try container.decodeIfPresent([ClipboardFileReference].self, forKey: .files) ?? []
+        pinnedAt = try container.decodeIfPresent(Date.self, forKey: .pinnedAt)
         id = try container.decodeIfPresent(String.self, forKey: .id) ?? Self.makeID(
             plainText: plainText,
             rtfData: rtfData,
@@ -540,6 +551,7 @@ public struct ClipboardItem: Codable, Equatable, Identifiable, Sendable {
         if !files.isEmpty {
             try container.encode(files, forKey: .files)
         }
+        try container.encodeIfPresent(pinnedAt, forKey: .pinnedAt)
     }
 }
 
@@ -665,10 +677,12 @@ public final class ClipboardHistoryStore {
         var savedItem = item
 
         // A copy of something copied before keeps the date it first arrived,
-        // and the app it came from when this time around nobody owned up.
+        // whether it was pinned, and the app it came from when this time around
+        // nobody owned up.
         if let existing = try? history.existing(id: item.id) {
             savedItem.createdAt = existing.createdAt
             savedItem.source = savedItem.source ?? existing.source
+            savedItem.pinnedAt = savedItem.pinnedAt ?? existing.pinnedAt
         }
 
         savedItem.updatedAt = Date()
@@ -737,6 +751,21 @@ public final class ClipboardHistoryStore {
         label: "com.shorty.clipboard.recognition",
         qos: .utility
     )
+
+    /// Pins or unpins an entry. Unpinning re-applies the history limit so an
+    /// ancient entry does not stay past the cap once unpinned.
+    @discardableResult
+    public func setPinned(_ pinned: Bool, id: String, at date: Date = Date()) -> Date? {
+        guard let history else {
+            return nil
+        }
+
+        let pinnedAt = try? history.setPinned(pinned, id: id, at: date)
+        if !pinned {
+            trim()
+        }
+        return pinnedAt ?? nil
+    }
 
     /// Forgets one entry, and the image it pointed at when nothing else uses
     /// it. Returns false when the entry had already gone.

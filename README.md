@@ -130,6 +130,7 @@ The picker is a floating panel with a search box. Choosing an item pastes it int
 | `cmd+return` | Copy to the clipboard without pasting |
 | `option+return` | Paste as plain text (no formatting) |
 | `shift+return` | Trim each line, drop empty lines, join with no separator, save as a new history item, and paste |
+| `cmd+p` | Pin or unpin the selected history entry |
 | `shift+backspace` | Delete the selected history entry |
 | `cmd+v` / `cmd+c` / `cmd+x` / `cmd+a` | Edit the search field |
 
@@ -150,6 +151,8 @@ the search box needs for deleting to the start of the line.
   ```
 
 - Keeps plain text and rich text (RTF, HTML, etc.).
+- Pinned items (`cmd+p`) live in a `Pinned` section just above `History` and are
+  never evicted by `history-limit`.
 - Keeps copied images, up to 10 MB each, beside the history in `ClipboardAssets/`. Pasting writes the image data, not a file path.
 - Reads the words in a copied picture, so a screenshot of an error or a page of
   code is listed by what it says and found by searching for it. Reading happens
@@ -471,16 +474,16 @@ Shorty --help
 
 ### Menu Bar
 
-The icon is a cup, which fills with coffee and steams while `Keep the Mac
-Awake` is on. If the config fails to load, a warning triangle sits in the
-cup's corner and the top of the menu says what went wrong; clicking that line
-reveals the config. Shorty keeps running whatever loaded before, and the
-warning clears on the next good load.
+The icon is a cup — a hollow outline while idle, filled with coffee and
+steaming while `Caffeinate` is on. If the config fails to load, a warning
+triangle sits in the cup's corner and the top of the menu says what went wrong;
+clicking that line reveals the config. Shorty keeps running whatever loaded
+before, and the warning clears on the next good load.
 
-The menu shows status, config path, and loaded shortcuts, plus `Keep the Mac
-Awake`, `Show Windows`, `Reload Config`, `Reveal Config`, `Open Accessibility
-Settings`, and `Quit`. Long lines are shortened in the middle so one path
-cannot stretch the menu; hover for the full text.
+The menu shows status, config path, and loaded shortcuts, plus `Caffeinate`,
+`Show Windows`, `Reload Config`, `Reveal Config`, `Launch at Login`, `Open
+Accessibility Settings`, and `Quit`. Long lines are shortened in the middle so
+one path cannot stretch the menu; hover for the full text.
 
 The app icon is the same cup, full and steaming, in white on a charcoal tile.
 Both come from `Sources/Shorty/CupGlyph.swift`: `build-app.sh` runs
