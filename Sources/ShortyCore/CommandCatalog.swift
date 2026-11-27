@@ -302,14 +302,6 @@ public enum CommandCatalog {
                 symbolName: "square.grid.2x2"
             ),
             CommandEntry(
-                id: "scratch-pad",
-                title: "Scratch Pad",
-                detail: "Plain-text draft",
-                destination: .view(.scratchPad),
-                keywords: ["scratch", "edit", "draft", "note", "text", "format", "pad"],
-                symbolName: "square.and.pencil"
-            ),
-            CommandEntry(
                 id: "files",
                 title: "Files",
                 detail: "Search home folder",
@@ -324,6 +316,14 @@ public enum CommandCatalog {
                 destination: .view(.clipboard(.combined)),
                 keywords: ["paste", "copy", "clipboard", "snippet"],
                 symbolName: "doc.on.clipboard"
+            ),
+            CommandEntry(
+                id: "scratch-pad",
+                title: "Scratch Pad",
+                detail: "Plain-text draft",
+                destination: .view(.scratchPad),
+                keywords: ["scratch", "edit", "draft", "note", "text", "format", "pad"],
+                symbolName: "square.and.pencil"
             ),
             CommandEntry(
                 id: "time",
@@ -343,10 +343,10 @@ public enum CommandCatalog {
             ),
             CommandEntry(
                 id: "keep-awake",
-                title: keepAwake ? "Let the Mac Sleep" : "Keep the Mac Awake",
-                detail: keepAwake ? "On" : "Off",
+                title: "Caffeinate",
+                detail: keepAwake ? "Let the Mac sleep" : "Keep the Mac awake",
                 action: .setKeepAwake(!keepAwake),
-                keywords: ["caffeine", "caffeinate", "sleep", "awake", "insomnia", "screensaver"],
+                keywords: ["caffeine", "caffeinate", "decaffeinate", "keep", "sleep", "awake", "insomnia", "screensaver"],
                 symbolName: keepAwake ? "cup.and.saucer.fill" : "cup.and.saucer"
             ),
         ]

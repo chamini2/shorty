@@ -915,6 +915,31 @@ private final class CommandPaletteEntryRowView: NSView {
                 chevronField.centerYAnchor.constraint(equalTo: centerYAnchor),
                 chevronField.widthAnchor.constraint(equalToConstant: Metrics.chevronWidth),
             ])
+        } else if case let .setKeepAwake(enabling) = entry.action {
+            let dotSize: CGFloat = 7
+            let isOn = !enabling
+            let dot = NSView()
+            dot.wantsLayer = true
+            dot.layer?.cornerRadius = dotSize / 2
+            if isOn {
+                dot.layer?.backgroundColor = NSColor.systemGreen.cgColor
+            } else {
+                dot.layer?.backgroundColor = NSColor.clear.cgColor
+                dot.layer?.borderWidth = 1.2
+                dot.layer?.borderColor = NSColor.tertiaryLabelColor.cgColor
+            }
+            dot.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(dot)
+
+            NSLayoutConstraint.activate([
+                dot.trailingAnchor.constraint(
+                    equalTo: trailingAnchor,
+                    constant: -(Metrics.horizontalPadding + (Metrics.chevronWidth - dotSize) / 2)
+                ),
+                dot.centerYAnchor.constraint(equalTo: centerYAnchor),
+                dot.widthAnchor.constraint(equalToConstant: dotSize),
+                dot.heightAnchor.constraint(equalToConstant: dotSize),
+            ])
         }
 
         guard let detail = entry.detail, !detail.isEmpty else {

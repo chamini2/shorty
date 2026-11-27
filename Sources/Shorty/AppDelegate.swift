@@ -15,7 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let pathMenuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let shortcutsHeaderItem = NSMenuItem(title: "Shortcuts", action: nil, keyEquivalent: "")
     private let emptyShortcutsItem = NSMenuItem(title: "No shortcuts loaded", action: nil, keyEquivalent: "")
-    private let keepAwakeItem = NSMenuItem(title: "Keep the Mac Awake", action: nil, keyEquivalent: "")
+    private let keepAwakeItem = NSMenuItem(title: "Caffeinate", action: nil, keyEquivalent: "")
     private var dynamicShortcutItems: [NSMenuItem] = []
     let box = ShortyBoxController()
     private lazy var clipboardPickerPanel = ClipboardPickerPanelController(box: box)

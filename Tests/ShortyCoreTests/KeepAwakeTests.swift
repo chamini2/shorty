@@ -35,12 +35,12 @@ final class KeepAwakeTests: XCTestCase {
         let off = try XCTUnwrap(CommandCatalog.rootEntries(query: "", keepAwake: false).first { $0.id == "keep-awake" })
         let on = try XCTUnwrap(CommandCatalog.rootEntries(query: "", keepAwake: true).first { $0.id == "keep-awake" })
 
-        XCTAssertEqual(off.title, "Keep the Mac Awake")
-        XCTAssertEqual(off.detail, "Off")
+        XCTAssertEqual(off.title, "Caffeinate")
+        XCTAssertEqual(off.detail, "Keep the Mac awake")
         XCTAssertEqual(off.action, .setKeepAwake(true))
 
-        XCTAssertEqual(on.title, "Let the Mac Sleep")
-        XCTAssertEqual(on.detail, "On, sleep is held off")
+        XCTAssertEqual(on.title, "Caffeinate")
+        XCTAssertEqual(on.detail, "Let the Mac sleep")
         XCTAssertEqual(on.action, .setKeepAwake(false))
     }
 
