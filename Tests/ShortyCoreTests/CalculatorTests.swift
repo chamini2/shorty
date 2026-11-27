@@ -101,10 +101,13 @@ final class CalculatorTests: XCTestCase {
             CommandCatalog.rootEntries(query: "1_000_000 / 4").first { $0.id == "result:calculator" }
         )
 
-        XCTAssertEqual(entry.title, "250,000")
-        XCTAssertEqual(entry.detail, "1_000_000 / 4")
+        // What was typed stays on the left and the answer sits where every
+        // other result row puts it, grouped for reading.
+        XCTAssertEqual(entry.title, "1_000_000 / 4")
+        XCTAssertEqual(entry.trailing, "250,000")
+        XCTAssertEqual(entry.layout, .result)
+        // Without the commas, since a comma pasted into a spreadsheet is
+        // not a number.
         XCTAssertEqual(entry.action, .copyText("250000"))
-        XCTAssertEqual(entry.layout, .detailed)
-        XCTAssertNotNil(entry.symbolName)
     }
 }

@@ -82,19 +82,21 @@ final class ApplicationIndexTests: XCTestCase {
     }
 
     func testTheIndexScansOnceUntilItIsStale() {
-        var scans = 0
+        // Counted through a reference, since the scan is `@Sendable` and a
+        // captured `var` cannot be mutated from one.
+        let scans = ScanCounter()
         let index = ApplicationIndex {
-            scans += 1
+            scans.count += 1
             return [InstalledApplication(name: "Mail", path: "/Applications/Mail.app", directoryName: "Applications")]
         }
         let start = Date()
 
         XCTAssertEqual(index.current(now: start).map(\.name), ["Mail"])
         _ = index.current(now: start.addingTimeInterval(1))
-        XCTAssertEqual(scans, 1, "a second opening of the box should not rescan the disk")
+        XCTAssertEqual(scans.count, 1, "a second opening of the box should not rescan the disk")
 
         _ = index.current(now: start.addingTimeInterval(ApplicationIndex.refreshInterval + 1))
-        XCTAssertEqual(scans, 2, "an installed app should be found eventually")
+        XCTAssertEqual(scans.count, 2, "an installed app should be found eventually")
     }
 
     func testApplicationsReachTheCommandBoxAsAGroup() throws {
@@ -130,6 +132,13 @@ final class ApplicationIndexTests: XCTestCase {
         }
         let entries = CommandCatalog.rootEntries(query: "note", applications: apps)
 
-        XCTAssertEqual(entries.count, 10)
+        // Apps only: the scratch pad answers to `note` as well, and the cap
+        // is on how many apps crowd the box, not on what else matches.
+        XCTAssertEqual(entries.filter { $0.title.hasPrefix("Applications › ") }.count, 10)
+    }
+
+    /// Shared with the scan closure, which is `@Sendable`.
+    private final class ScanCounter: @unchecked Sendable {
+        var count = 0
     }
 }

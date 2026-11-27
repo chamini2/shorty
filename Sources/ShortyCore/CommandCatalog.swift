@@ -37,6 +37,7 @@ public enum CommandSearchKind: Equatable, Sendable {
 
 public enum CommandViewKind: Equatable, Sendable {
     case clipboard(ClipboardMenuKind)
+    case scratchPad
 }
 
 /// How much room a row is given.
@@ -159,6 +160,7 @@ public enum CommandCatalog {
         keepAwake: Bool = false,
         screenCount: Int = 1,
         applications: [InstalledApplication] = [],
+        applicationOpens: [String: Int] = [:],
         transformers: [CommandTransformer] = CommandTransformerEngine.defaultTransformers
     ) -> [CommandEntry] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -170,7 +172,8 @@ public enum CommandCatalog {
             snippetGroups: snippetGroups,
             keepAwake: keepAwake,
             screenCount: screenCount,
-            applications: applications
+            applications: applications,
+            applicationOpens: applicationOpens
         )
 
         return resultEntries(
@@ -286,58 +289,87 @@ public enum CommandCatalog {
         snippetGroups: [SnippetGroup],
         keepAwake: Bool,
         screenCount: Int,
-        applications: [InstalledApplication] = []
+        applications: [InstalledApplication] = [],
+        applicationOpens: [String: Int] = [:]
     ) -> [CommandEntry] {
         [
             CommandEntry(
                 id: "applications",
                 title: "Applications",
                 detail: applications.isEmpty ? "None found" : "\(applications.count) installed",
-                destination: .list(applicationEntries(applications)),
-                keywords: ["app", "apps", "open", "launch", "run"]
+                destination: .list(applicationEntries(applications, opens: applicationOpens)),
+                keywords: ["app", "apps", "open", "launch", "run"],
+                symbolName: "square.grid.2x2"
             ),
             CommandEntry(
                 id: "files",
                 title: "Files",
-                detail: "Search your home folder",
+                detail: "Search home folder",
                 destination: .search(.files),
-                keywords: ["file", "find", "spotlight", "document", "folder", "open"]
+                keywords: ["file", "find", "spotlight", "document", "folder", "open"],
+                symbolName: "folder"
             ),
             CommandEntry(
                 id: "clipboard.history",
                 title: "Clipboard History",
                 detail: history.isEmpty ? "Nothing copied yet" : "\(history.count) entries",
                 destination: .view(.clipboard(.combined)),
-                keywords: ["paste", "copy", "clipboard", "snippet"]
+                keywords: ["paste", "copy", "clipboard", "snippet"],
+                symbolName: "doc.on.clipboard"
+            ),
+            CommandEntry(
+                id: "scratch-pad",
+                title: "Scratch Pad",
+                detail: "Plain-text draft",
+                destination: .view(.scratchPad),
+                keywords: ["scratch", "edit", "draft", "note", "text", "format", "pad"],
+                symbolName: "square.and.pencil"
             ),
             CommandEntry(
                 id: "time",
                 title: "Time",
-                detail: "Current time around the world",
+                detail: "World clocks",
                 destination: .search(.timeZones),
-                keywords: ["clock", "timezone", "zone"]
-            ),
-            CommandEntry(
-                id: "keep-awake",
-                title: keepAwake ? "Let the Mac Sleep" : "Keep the Mac Awake",
-                detail: keepAwake ? "On, sleep is held off" : "Off",
-                action: .setKeepAwake(!keepAwake),
-                keywords: ["caffeine", "caffeinate", "sleep", "awake", "insomnia", "screensaver"]
+                keywords: ["clock", "timezone", "zone"],
+                symbolName: "clock"
             ),
             CommandEntry(
                 id: "window",
                 title: "Window",
-                detail: "Move the focused window",
+                detail: "Arrange focused window",
                 destination: .list(windowEntries(screenCount: screenCount)),
-                keywords: ["layout", "position", "arrange"]
+                keywords: ["layout", "position", "arrange"],
+                symbolName: "macwindow"
+            ),
+            CommandEntry(
+                id: "keep-awake",
+                title: "Caffeinate",
+                detail: keepAwake ? "Let the Mac sleep" : "Keep the Mac awake",
+                action: .setKeepAwake(!keepAwake),
+                keywords: ["caffeine", "caffeinate", "decaffeinate", "keep", "sleep", "awake", "insomnia", "screensaver"],
+                symbolName: keepAwake ? "cup.and.saucer.fill" : "cup.and.saucer"
             ),
         ]
     }
 
     /// One row per app, labelled with where it was found so two apps of the
     /// same name can be told apart.
-    private static func applicationEntries(_ applications: [InstalledApplication]) -> [CommandEntry] {
-        applications.map { application in
+    private static func applicationEntries(
+        _ applications: [InstalledApplication],
+        opens: [String: Int] = [:]
+    ) -> [CommandEntry] {
+        // The ones you open, most used first; everything else keeps its
+        // alphabetical place underneath.
+        let ordered = applications.sorted { left, right in
+            let leftOpens = opens[left.path] ?? 0
+            let rightOpens = opens[right.path] ?? 0
+
+            return leftOpens == rightOpens
+                ? left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
+                : leftOpens > rightOpens
+        }
+
+        return ordered.map { application in
             CommandEntry(
                 id: application.id,
                 title: application.name,
@@ -395,18 +427,16 @@ public enum CommandCatalog {
             windowEntry(
                 "cascade",
                 "Cascade Windows",
-                .cascade(WindowCascadeOptions(scope: .space)),
-                ["stack", "arrange", "tile", "all", "desktop", "space", "overlap"],
-                detail: "shift ⏎ stacks the rest around this one"
+                .cascade(.space),
+                ["stack", "arrange", "tile", "all", "desktop", "space", "overlap"]
             )
         )
         entries.append(
             windowEntry(
                 "cascade-app",
                 "Cascade App Windows",
-                .cascade(WindowCascadeOptions(scope: .application)),
-                ["stack", "arrange", "app", "same", "application"],
-                detail: "shift ⏎ stacks the rest around this one"
+                .cascade(.application),
+                ["stack", "arrange", "app", "same", "application"]
             )
         )
         entries.append(

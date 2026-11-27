@@ -11,6 +11,7 @@ public final class ShortyController {
     public var statusHandler: StatusHandler?
     public var clipboardMenuHandler: ((ClipboardMenuKind) -> Void)?
     public var textCommandHandler: (() -> Void)?
+    public var scratchPadHandler: (() -> Void)?
     public var commandBoxSettingsHandler: ((CommandBoxSettings) -> Void)?
     public var windowSwitcherHandler: ((WindowSwitcherUpdate) -> Void)?
     public var permissionRequestHandler: ((ShortyPermissionPane) -> Void)?
@@ -19,17 +20,15 @@ public final class ShortyController {
         get { clipboardMonitor.didCapture }
         set { clipboardMonitor.didCapture = newValue }
     }
-    /// Every combo Shorty answers to, built-in and configured alike.
-    public var boundHotKeys: [KeyCombo] {
-        loadedBindings.boundActions.map(\.hotKey)
-            + loadedShortcuts.flatMap { [$0.hotKey] + $0.aliasHotKeys }
-    }
 
     public private(set) var loadedShortcuts: [LoadedShortcut] = []
     public private(set) var loadedSnippetGroups: [SnippetGroup] = []
     public private(set) var loadedBindings: HotKeyBindings = .default
     public private(set) var loadedCommandBox: CommandBoxSettings = .default
     public private(set) var loadedClipboardSettings: ClipboardSettings = .default
+    /// Why the config last failed to load, cleared by the next good load.
+    /// Whatever loaded before keeps running in the meantime.
+    public private(set) var configIssue: String?
     private var numpadAliases = NumpadAliasResolver(claimedHotKeys: [])
 
     private let console: Console
@@ -113,6 +112,8 @@ public final class ShortyController {
             loadedCommandBox = configuration.commandBox
             loadedClipboardSettings = configuration.clipboard
             clipboardHistoryStore.setMaximumItems(configuration.clipboard.historyLimit)
+            clipboardHistoryStore.setReadsPictures(configuration.clipboard.readsPictures)
+            clipboardHistoryStore.readPicturesAlreadyStored()
             commandBoxSettingsHandler?(loadedCommandBox)
             if didCompleteStart, loadedBindings != previousBindings {
                 applyBindings(changedFrom: previousBindings)
@@ -121,15 +122,18 @@ public final class ShortyController {
             let snippetCount = configuration.snippetGroups.reduce(0) { $0 + $1.snippets.count }
             let summary = "Loaded \(configuration.shortcuts.count) shortcut(s) and \(snippetCount) snippet(s)."
             console.info("\(summary) From \(options.configURL.path). Reason: \(reason).")
+            configIssue = nil
             publishStatus(summary)
         } catch {
             let snippetCount = loadedSnippetGroups.reduce(0) { $0 + $1.snippets.count }
             let fallback = loadedShortcuts.isEmpty && snippetCount == 0
                 ? "No shortcuts or snippets active."
                 : "Keeping \(loadedShortcuts.count) previous shortcut(s) and \(snippetCount) previous snippet(s)."
-            let message = "Config reload failed: \(error). \(fallback)"
-            console.error(message)
-            publishStatus(message)
+            console.error("Config reload failed: \(error). \(fallback)")
+            // The error is published on its own; the status says what is
+            // still running, so the two are not shown twice over.
+            configIssue = "\(error)"
+            publishStatus(fallback)
         }
     }
 
@@ -231,6 +235,11 @@ public final class ShortyController {
         append(loadedBindings.commandBox) { [weak self] in
             self?.console.info("Hotkey for command box triggered.")
             self?.textCommandHandler?()
+        }
+
+        append(loadedBindings.scratchPad) { [weak self] in
+            self?.console.info("Hotkey for scratch pad triggered.")
+            self?.scratchPadHandler?()
         }
 
         let moveBindings: [(KeyCombo?, WindowMoveCommand)] = [

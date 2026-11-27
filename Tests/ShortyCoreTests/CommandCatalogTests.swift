@@ -21,7 +21,15 @@ final class CommandCatalogTests: XCTestCase {
 
         XCTAssertEqual(
             entries.map(\.title),
-            ["Clipboard History", "Time", "Keep the Mac Awake", "Window"]
+            [
+                "Applications",
+                "Files",
+                "Clipboard History",
+                "Scratch Pad",
+                "Time",
+                "Window",
+                "Caffeinate",
+            ]
         )
         XCTAssertFalse(entries.contains { $0.title == "Snippets" }, "the picker already lists them")
         XCTAssertFalse(
@@ -54,12 +62,15 @@ final class CommandCatalogTests: XCTestCase {
             windowMoves(screenCount: 2),
             [
                 "Maximize",
+                "Almost Maximize",
                 "Make Larger",
                 "Make Smaller",
                 "Left Half",
                 "Right Half",
                 "Left Monitor",
                 "Right Monitor",
+                "Cascade Windows",
+                "Cascade App Windows",
                 "Restore",
             ]
         )
@@ -68,7 +79,17 @@ final class CommandCatalogTests: XCTestCase {
     func testMonitorMovesAreLeftOutWithOneDisplay() {
         XCTAssertEqual(
             windowMoves(screenCount: 1),
-            ["Maximize", "Make Larger", "Make Smaller", "Left Half", "Right Half", "Restore"]
+            [
+                "Maximize",
+                "Almost Maximize",
+                "Make Larger",
+                "Make Smaller",
+                "Left Half",
+                "Right Half",
+                "Cascade Windows",
+                "Cascade App Windows",
+                "Restore",
+            ]
         )
 
         // Nor does searching surface something that could not work.

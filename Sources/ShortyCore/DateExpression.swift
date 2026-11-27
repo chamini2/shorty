@@ -184,6 +184,7 @@ private struct Parser {
     private var index = 0
     /// `now` alone is the current time, which the Time list answers better.
     private var baseWasNow = false
+    private var baseWasEpoch = false
 
     init(text: String, now: Date, zone: TimeZone) {
         // Split on spaces and on the signs, so `now-1h` reads the same as
@@ -228,6 +229,7 @@ private struct Parser {
 
         var didArithmetic = false
 
+
         while index < words.count {
             let word = words[index]
 
@@ -264,7 +266,10 @@ private struct Parser {
             return .span(current.timeIntervalSince(other), from: other, to: current)
         }
 
-        return .moment(current, nil, named: didArithmetic || !baseWasNow)
+        // A bare epoch is already answered by the converter above, which
+        // says the same thing with its name on it; a second row repeating
+        // it is noise. It still anchors arithmetic.
+        return .moment(current, nil, named: didArithmetic || (!baseWasNow && !baseWasEpoch))
     }
 
     private mutating func parseZone() -> TimeZone? {
@@ -320,6 +325,7 @@ private struct Parser {
         // arithmetic here.
         if word.count == 10, let seconds = TimeInterval(word) {
             index += 1
+            baseWasEpoch = true
             return Date(timeIntervalSince1970: seconds)
         }
 

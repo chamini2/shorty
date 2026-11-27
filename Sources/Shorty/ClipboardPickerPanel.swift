@@ -27,27 +27,15 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         static let iconSize: CGFloat = 16
     }
 
-    private struct HandledKeyEvent {
-        let keyCode: UInt16
-        let timestamp: TimeInterval
-
-        init(_ event: NSEvent) {
-            keyCode = event.keyCode
-            timestamp = event.timestamp
-        }
-
-        func matches(_ event: NSEvent) -> Bool {
-            keyCode == event.keyCode && timestamp == event.timestamp
-        }
-    }
-
     private let box: ShortyBoxController
     private let contentView = NSView()
     private let header = ShortyBoxHeaderView()
-    private var searchField: ShortyBoxSearchField { header.searchField }
+    private var searchField: NSTextField { header.searchField }
     private let tableView = ClipboardPickerTableView()
     private let scrollView = ClipboardPickerScrollView()
     private let detailView = ClipboardPickerDetailView()
+    private let footerDivider = NSView()
+    private let footer = NSTextField(labelWithString: "")
 
     var showsLinkPreviews = true {
         didSet {
@@ -65,8 +53,8 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     private var onSelect: ((ClipboardPickerResult, ClipboardPickerActivationMode) -> Void)?
     private var onCancel: (() -> Void)?
     private var onDelete: ((ClipboardItem) -> Void)?
-    private var keyMonitor: Any?
-    private var locallyHandledKeyEvent: HandledKeyEvent?
+    private var closesBoxOnSelect = true
+    private var savedSelection: NSRange?
     private var sourceIconCache: [String: NSImage] = [:]
     private var thumbnailCache: [String: NSImage] = [:]
     private let assetStore = ClipboardAssetStore()
@@ -94,29 +82,58 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
 
     // MARK: ShortyBoxContent
 
+    var route: ShortyBoxRoute {
+        let kind: ClipboardMenuKind = mode == .snippetsOnly ? .snippets : .combined
+        let purpose: ClipboardPickerPurpose = closesBoxOnSelect ? .paste : .insert
+        return .clipboard(kind, purpose: purpose)
+    }
+
     var view: NSView {
         contentView
     }
 
+    var hasDraft: Bool {
+        !query.isEmpty || currentFolder != nil
+    }
+
     func boxDidPresent(in window: NSWindow) {
-        startKeyMonitor()
         window.makeFirstResponder(searchField)
     }
 
-    func boxHandlesKey(_ event: NSEvent) -> Bool {
-        handlePanelKeyEvent(event)
+    func boxWillSuspend() {
+        savedSelection = selectedRange()
+    }
+
+    func boxDidResume(in window: NSWindow) {
+        window.makeFirstResponder(searchField)
+        restoreCaretAfterResume()
+    }
+
+    func boxPerformsKeyEquivalent(_ event: NSEvent) -> Bool {
+        switch UInt32(event.keyCode) {
+        case UInt32(kVK_Return), UInt32(kVK_ANSI_KeypadEnter):
+            let activationMode = Self.activationMode(event: event)
+            guard activationMode != .standard else {
+                return false
+            }
+
+            activateSelected(activationMode: activationMode)
+            return true
+
+        default:
+            return false
+        }
     }
 
     func boxDidDismiss() {
-        stopKeyMonitor()
         let handler = onCancel
         onSelect = nil
         onCancel = nil
-
-        // Only the outermost dismissal means "nothing was picked".
-        if box.depth == 0 {
-            handler?()
-        }
+        currentFolder = nil
+        query = ""
+        searchField.stringValue = ""
+        savedSelection = nil
+        handler?()
     }
 
     /// Escape clears what you typed first, then leaves a folder, then lets
@@ -125,6 +142,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         if !searchField.stringValue.isEmpty {
             searchField.stringValue = ""
             query = ""
+            savedSelection = nil
             applyFilter(resetSelection: true)
             return true
         }
@@ -136,21 +154,55 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         mode: ClipboardPickerMode,
         history: [ClipboardItem],
         snippetGroups: [SnippetGroup],
+        closesBoxOnSelect: Bool = true,
         onSelect: @escaping (ClipboardPickerResult, ClipboardPickerActivationMode) -> Void,
-        onCancel: @escaping () -> Void,
+        onCancel: (() -> Void)? = nil,
         onDelete: ((ClipboardItem) -> Void)? = nil
     ) {
         self.mode = mode
         self.history = history
         self.snippetGroups = snippetGroups
+        self.closesBoxOnSelect = closesBoxOnSelect
         self.currentFolder = nil
         self.query = ""
+        self.savedSelection = nil
         self.onSelect = onSelect
         self.onDelete = onDelete
         self.onCancel = onCancel
         searchField.stringValue = ""
         updateHeader()
 
+        applyFilter(resetSelection: true)
+    }
+
+    func refresh(
+        history: [ClipboardItem],
+        snippetGroups: [SnippetGroup],
+        showsLinkPreviews: Bool
+    ) {
+        self.history = history
+        self.snippetGroups = snippetGroups
+        self.showsLinkPreviews = showsLinkPreviews
+        if let folder = currentFolder {
+            let roots = ClipboardPickerSearch.rootEntries(
+                history: history,
+                snippetGroups: snippetGroups,
+                query: "",
+                mode: mode
+            )
+            currentFolder = roots.compactMap(\.folder).first(where: { $0.id == folder.id })
+        }
+        updateHeader()
+        applyFilter(resetSelection: false)
+    }
+
+    func switchMode(_ mode: ClipboardPickerMode) {
+        self.mode = mode
+        currentFolder = nil
+        query = ""
+        savedSelection = nil
+        searchField.stringValue = ""
+        updateHeader()
         applyFilter(resetSelection: true)
     }
 
@@ -209,7 +261,14 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         divider.wantsLayer = true
         divider.layer?.backgroundColor = NSColor(calibratedWhite: 1, alpha: 0.08).cgColor
 
-        for view in [header, scrollView, divider, detailView] as [NSView] {
+        footerDivider.wantsLayer = true
+        footerDivider.layer?.backgroundColor = NSColor(calibratedWhite: 1, alpha: 0.08).cgColor
+
+        footer.font = .systemFont(ofSize: 11)
+        footer.textColor = .secondaryLabelColor
+        footer.lineBreakMode = .byTruncatingTail
+
+        for view in [header, scrollView, divider, detailView, footerDivider, footer] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(view)
         }
@@ -222,30 +281,37 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
             scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Metrics.searchBottomSpacing),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.widthAnchor.constraint(equalToConstant: Metrics.listWidth),
-            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Metrics.bottomPadding),
+            scrollView.bottomAnchor.constraint(equalTo: footerDivider.topAnchor, constant: -Metrics.bottomPadding),
 
             divider.leadingAnchor.constraint(equalTo: scrollView.trailingAnchor),
             divider.widthAnchor.constraint(equalToConstant: Metrics.dividerWidth),
             divider.topAnchor.constraint(equalTo: scrollView.topAnchor),
-            divider.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            divider.bottomAnchor.constraint(equalTo: footerDivider.topAnchor),
 
             detailView.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
             detailView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             detailView.topAnchor.constraint(equalTo: scrollView.topAnchor),
-            detailView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            detailView.bottomAnchor.constraint(equalTo: footerDivider.topAnchor),
+
+            footerDivider.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
+            footerDivider.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
+            footerDivider.heightAnchor.constraint(equalToConstant: 1),
+            footerDivider.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -6),
+
+            footer.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            footer.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            footer.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
         ])
     }
 
     private func configureSearchField() {
         searchField.delegate = self
-        searchField.keyHandler = { [weak self] event in
-            self?.handleKeyDown(event) ?? false
-        }
         updateHeader()
     }
 
     /// Names the section on screen, down to the snippet folder you opened.
     private func updateHeader() {
+        updateFooter()
         if let currentFolder {
             header.update(title: currentFolder.title, symbolName: "folder")
             return
@@ -256,6 +322,22 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
             title: title,
             symbolName: mode == .snippetsOnly ? "text.quote" : "doc.on.clipboard"
         )
+    }
+
+    private func updateFooter() {
+        var parts: [String] = []
+        if closesBoxOnSelect {
+            parts = ["↩ paste", "⌘↩ copy", "⌥↩ plain", "⇧↩ join", "⇧⌘E scratch pad", "⇧⌫ delete"]
+        } else {
+            parts = ["↩ insert"]
+        }
+
+        if currentFolder != nil {
+            parts.append("← back")
+        }
+
+        parts.append(closesBoxOnSelect ? "esc close" : "esc back")
+        footer.stringValue = parts.joined(separator: "    ")
     }
 
     private func configureTable() {
@@ -313,31 +395,23 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     ) -> Bool {
         switch commandSelector {
         case #selector(NSResponder.moveUp(_:)):
-            if consumeLocallyHandledCurrentEvent() {
-                return true
-            }
-
             moveSelection(by: -1)
             return true
 
         case #selector(NSResponder.moveDown(_:)):
-            if consumeLocallyHandledCurrentEvent() {
-                return true
-            }
-
             moveSelection(by: 1)
             return true
 
         case #selector(NSResponder.moveLeft(_:)):
-            if consumeLocallyHandledCurrentEvent() {
-                return true
+            guard caretIsAtStartOfQuery else {
+                return false
             }
 
             return leaveFolderIfNeeded()
 
         case #selector(NSResponder.moveRight(_:)):
-            if consumeLocallyHandledCurrentEvent() {
-                return true
+            guard caretIsAtEndOfQuery else {
+                return false
             }
 
             return enterSelectedFolderIfNeeded()
@@ -348,28 +422,32 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
             // editor must not take a character out of the search box as well.
             // AppKit drops the modifier when it turns a key into a command,
             // so the shift is read back off the event.
-            guard Self.shiftModifierIsActive(event: NSApp.currentEvent) else {
+            if Self.shiftModifierIsActive(event: NSApp.currentEvent) {
+                return deleteSelectedHistoryItem()
+            }
+
+            if !query.isEmpty {
                 return false
             }
 
-            if consumeLocallyHandledCurrentEvent() {
-                return true
-            }
+            return leaveFolderIfNeeded()
 
-            return deleteSelectedHistoryItem()
+        case #selector(NSResponder.insertNewline(_:)):
+            activateSelected(activationMode: Self.activationMode(event: NSApp.currentEvent))
+            return true
 
-        case #selector(NSResponder.insertNewline(_:)),
-            #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
-            if consumeLocallyHandledCurrentEvent() {
-                return true
-            }
-
-            activateSelected(activationMode: Self.activationMode())
+        case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+            let mode = ClipboardPickerActivationMode.fromModifiers(
+                command: Self.commandModifierIsActive(event: NSApp.currentEvent),
+                shift: Self.shiftModifierIsActive(event: NSApp.currentEvent),
+                option: true
+            )
+            activateSelected(activationMode: mode)
             return true
 
         case #selector(NSResponder.cancelOperation(_:)):
             // The box handles escape.
-            return consumeLocallyHandledCurrentEvent()
+            return false
 
         default:
             return false
@@ -462,15 +540,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     }
 
 
-    private func handleKeyDown(_ event: NSEvent, consumesLocalDuplicate: Bool = true) -> Bool {
-        if consumesLocalDuplicate, consumeLocallyHandledEvent(event) {
-            return true
-        }
-
-        if forwardEditCommandIfNeeded(event) {
-            return true
-        }
-
+    private func handleKeyDown(_ event: NSEvent) -> Bool {
         switch UInt32(event.keyCode) {
         case UInt32(kVK_Escape):
             // The box handles escape.
@@ -513,96 +583,74 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         }
     }
 
-    private func startKeyMonitor() {
-        stopKeyMonitor()
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.handleLocalKeyDown(event) ?? event
+    private var caretIsAtStartOfQuery: Bool {
+        let text = searchField.stringValue
+        guard !text.isEmpty else {
+            return true
         }
+
+        guard let range = searchField.currentEditor()?.selectedRange else {
+            return false
+        }
+
+        return range.location == 0 && range.length == 0
     }
 
-    private func stopKeyMonitor() {
-        if let keyMonitor {
-            NSEvent.removeMonitor(keyMonitor)
-            self.keyMonitor = nil
+    private var caretIsAtEndOfQuery: Bool {
+        let length = (searchField.stringValue as NSString).length
+        guard let range = searchField.currentEditor()?.selectedRange else {
+            return true
         }
+
+        return range.location + range.length >= length
     }
 
-    private func handleLocalKeyDown(_ event: NSEvent) -> NSEvent? {
-        if consumeLocallyHandledEvent(event) {
+    private func selectedRange() -> NSRange {
+        if let editor = searchField.currentEditor() {
+            return editor.selectedRange
+        }
+
+        return NSRange(location: (searchField.stringValue as NSString).length, length: 0)
+    }
+
+    private func restoreCaretAfterResume() {
+        let value = searchField.stringValue as NSString
+        let fallback = NSRange(location: value.length, length: 0)
+        let candidate = savedSelection ?? fallback
+        savedSelection = nil
+
+        let range: NSRange
+        if candidate.location >= 0, candidate.location <= value.length {
+            range = NSRange(location: candidate.location, length: min(candidate.length, value.length - candidate.location))
+        } else {
+            range = fallback
+        }
+
+        searchField.currentEditor()?.selectedRange = range
+    }
+
+    /// What is selected, for the scratch pad to open on.
+    ///
+    /// Nil when the row is not something with text in it, which is what
+    /// tells the pad's hotkey to behave as it does everywhere else.
+    var selectedTextForScratchPad: String? {
+        guard entries.indices.contains(selectedIndex) else {
             return nil
         }
 
-        guard isPresented,
-              event.window === box.window || NSApp.keyWindow === box.window
-        else {
-            return event
-        }
+        let text: String
 
-        guard handleKeyDown(event, consumesLocalDuplicate: false) else {
-            return event
-        }
-
-        locallyHandledKeyEvent = HandledKeyEvent(event)
-        return nil
-    }
-
-    private func consumeLocallyHandledCurrentEvent() -> Bool {
-        guard let event = NSApp.currentEvent else {
-            return false
-        }
-
-        return consumeLocallyHandledEvent(event)
-    }
-
-    /// A menu bar app has no Edit menu, so AppKit never turns `cmd+v` and
-    /// friends into editing actions. Send them to the field editor directly.
-    private func forwardEditCommandIfNeeded(_ event: NSEvent) -> Bool {
-        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-              let key = event.charactersIgnoringModifiers?.lowercased(),
-              let action = Self.editActionsByKey[key] else {
-            return false
-        }
-
-        return NSApp.sendAction(action, to: nil, from: searchField)
-    }
-
-    private static let editActionsByKey: [String: Selector] = [
-        "v": #selector(NSText.paste(_:)),
-        "c": #selector(NSText.copy(_:)),
-        "x": #selector(NSText.cut(_:)),
-        "a": #selector(NSText.selectAll(_:)),
-        "z": Selector(("undo:")),
-    ]
-
-    private func consumeLocallyHandledEvent(_ event: NSEvent) -> Bool {
-        guard locallyHandledKeyEvent?.matches(event) == true else {
-            return false
-        }
-
-        locallyHandledKeyEvent = nil
-        return true
-    }
-
-    private func handlePanelKeyEvent(_ event: NSEvent) -> Bool {
-        guard event.type == .keyDown else {
-            return false
-        }
-
-        switch UInt32(event.keyCode) {
-        case UInt32(kVK_Return), UInt32(kVK_ANSI_KeypadEnter):
-            let activationMode = Self.activationMode(event: event)
-            guard activationMode != .standard else {
-                return false
-            }
-
-            activateSelected(activationMode: activationMode)
-            return true
-
+        switch entries[selectedIndex] {
+        case let .history(item):
+            // A picture with words read out of it has something to work on.
+            text = item.plainText.isEmpty ? (item.ocrText ?? "") : item.plainText
+        case let .snippet(_, snippet):
+            text = snippet.content
         default:
-            // Edit keys are forwarded from `handleKeyDown`, which the local key
-            // monitor drives. Doing it here too would paste twice.
-            return false
+            return nil
         }
+
+        return text.isEmpty ? nil : text
     }
 
     fileprivate static func activationMode(event: NSEvent? = nil) -> ClipboardPickerActivationMode {
@@ -785,7 +833,13 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         }
 
         let handler = onSelect
-        box.close()
+        onSelect = nil
+        onCancel = nil
+        if closesBoxOnSelect {
+            box.close()
+        } else {
+            box.pop()
+        }
         handler?(result, activationMode)
     }
 

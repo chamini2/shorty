@@ -97,7 +97,7 @@ Rectangle-style hotkeys for the focused window:
 | `ctrl+option+left` | Left half of the current monitor. If already there, right half of the monitor to the left (wraps). |
 | `ctrl+option+right` | Right half of the current monitor. If already there, left half of the monitor to the right (wraps). |
 | `ctrl+option+cmd+up` | Maximize to the current monitor |
-| _(cascade rows)_ | `return` stacks every window on this desktop, each one down and right of the last, keeping the one you are in at the front. `shift+return` leaves that window where it is and stacks the rest out from its corner |
+| _(cascade rows)_ | Stacks the windows on this desktop, or just the focused app's, each one down and right of the last. The window you are in stays exactly where it is and the rest flow out from its corner |
 | _(unbound)_ | `almost-maximize`: nine tenths of the monitor, centred |
 | `ctrl+option+cmd+left` | Move to the monitor on the left, keeping proportional position and size (wraps) |
 | `ctrl+option+cmd+right` | Move to the monitor on the right, keeping proportional position and size (wraps) |
@@ -151,6 +151,18 @@ the search box needs for deleting to the start of the line.
 
 - Keeps plain text and rich text (RTF, HTML, etc.).
 - Keeps copied images, up to 10 MB each, beside the history in `ClipboardAssets/`. Pasting writes the image data, not a file path.
+- Reads the words in a copied picture, so a screenshot of an error or a page of
+  code is listed by what it says and found by searching for it. Reading happens
+  on-device, after the entry is stored, so copying never waits for it; pictures
+  copied before this existed are read in the background on the next launch.
+  What is read is a label and a search key: pasting a screenshot still pastes
+  the picture. Turn it off with:
+
+  ```yaml
+  clipboard:
+    read-images: false
+  ```
+
 - Keeps copied files as paths rather than copies, so pasting hands over the file itself. An entry whose file has moved says so and is skipped.
 - Skips anything the copier marked private: `org.nspasteboard.ConcealedType`,
   which password managers and Keychain Access set on a copied secret, and the
@@ -172,7 +184,11 @@ the search box needs for deleting to the start of the line.
     link-previews: false
   ```
 
-- Persists across restarts in `~/Library/Application Support/Shorty/ClipboardHistory.json`.
+- Persists across restarts in `~/Library/Application Support/Shorty/Shorty.sqlite`,
+  alongside link previews and recently opened files. Copied images and preview
+  pictures stay as files beside it, named by the hash of their contents. An
+  older install's JSON files are imported on first launch and kept, renamed,
+  rather than deleted.
 - The right-hand pane shows the entry in full, with its source, type, size and when it was copied.
 
 ### Snippets
@@ -219,7 +235,7 @@ Entries that take you somewhere carry a `›`:
 | `Applications ›` | Every app on the machine, with its icon. Opening one brings it forward when it is already running |
 | `Files ›` | Search your home folder by name and contents, through the Spotlight index. Opens on the files you reached for here, then the ones the Mac opened last. `return` opens a file, `cmd+return` reveals it in Finder, `option+return` copies its path |
 | `Window ›` | `Cascade Windows` and `Cascade App Windows`, `Maximize`, `Almost Maximize`, `Make Larger`, `Make Smaller`, the halves, the monitor moves when a second display is attached, and `Restore` |
-| `Keep the Mac Awake` | holds off idle and display sleep, like `caffeinate` |
+| `Caffeinate` | holds off idle sleep while letting the display sleep, like `caffeinate -i` |
 
 Typing a timestamp or a size converts it, above the commands:
 
@@ -230,9 +246,10 @@ Typing a timestamp or a size converts it, above the commands:
 | `1.5 gb` (units `b`, `bytes`, `kb`, `mb`, `gb`, `tb`) | The size in every other unit (1024-based) |
 
 Searching is fuzzy and reaches into lists, so `sf` finds `Time › San Francisco`
-and `maxi` finds `Window › Maximize` without opening either first. The box
-reopens on whatever you ran last, with the text selected, so the hotkey and
-`return` repeat it.
+and `maxi` finds `Window › Maximize` without opening either first. Hiding the
+box (by toggling its hotkey or switching to another app) keeps your navigation
+stack, search text, and caret position for 10 minutes so you can pick up where
+you left off; running an action or pressing `escape` all the way out clears it.
 
 The box and the clipboard picker share one window: choosing `Clipboard History`
 swaps the contents rather than opening a second panel, and `escape` comes back.
@@ -240,6 +257,33 @@ swaps the contents rather than opening a second panel, and `escape` comes back.
 Inside the command box, `cmd+shift+v` / `cmd+shift+b` open the clipboard / snippets picker and insert the chosen text at the cursor.
 
 To turn the command box off, set `command-box: off` under `hotkeys`. Shorty then leaves `option+space` to other apps, and an app shortcut may use it.
+
+## Scratch Pad
+
+A page to work text over before it goes anywhere. The pasteboard is a bad
+workbench — every intermediate step overwrites the thing being worked on — so
+`cmd+shift+e` opens a plain-text page that stays as it was left: paste
+something in, reshape it, and copy out the version you wanted. The command box
+reaches it too, as `Scratch Pad`.
+
+Inside the clipboard picker, the pad's hotkey (`cmd+shift+e`) sends the
+selected entry to the pad; `escape` comes back to the picker. Text is added
+after what is already there rather than replacing it, so the pad can collect
+several pieces.
+
+| Key | Does |
+| --- | --- |
+| `cmd+return` | Copy the whole page and close |
+| `shift+cmd+return` | Copy just the selection and close |
+| `escape` | Close, leaving the page as it is |
+
+Ordinary editing keys work inside it: `cmd+a`, `cmd+c`, `cmd+v`, `cmd+x`,
+`cmd+z` and `shift+cmd+z`.
+
+The page is plain text, so what comes out pastes as itself rather than carrying
+formatting from wherever it came from. It is kept across restarts, but it is
+one page and not a note: copying out does not clear it, and nothing is
+versioned. The footer counts lines, words and characters.
 
 ## Hotkeys
 
@@ -249,6 +293,7 @@ Every built-in key lives in an optional top-level `hotkeys` section. Set a key t
 hotkeys:
   clipboard-menu: cmd+shift+v
   snippets-menu: cmd+shift+b
+  scratch-pad: cmd+shift+e
   command-box: off
   window-switcher:
     all-windows: cmd+tab
@@ -427,9 +472,17 @@ Shorty --help
 ### Menu Bar
 
 The icon is a cup, which fills with coffee and steams while `Keep the Mac
-Awake` is on.
+Awake` is on. If the config fails to load, a warning triangle sits in the
+cup's corner and the top of the menu says what went wrong; clicking that line
+reveals the config. Shorty keeps running whatever loaded before, and the
+warning clears on the next good load.
 
 The menu shows status, config path, and loaded shortcuts, plus `Keep the Mac
 Awake`, `Show Windows`, `Reload Config`, `Reveal Config`, `Open Accessibility
 Settings`, and `Quit`. Long lines are shortened in the middle so one path
 cannot stretch the menu; hover for the full text.
+
+The app icon is the same cup, full and steaming, in white on a charcoal tile.
+Both come from `Sources/Shorty/CupGlyph.swift`: `build-app.sh` runs
+`Packaging/make-icon.sh`, which draws the icon from it, so a change to the cup
+shows in both on the next build.

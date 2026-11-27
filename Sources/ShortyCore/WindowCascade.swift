@@ -9,24 +9,6 @@ public enum WindowCascadeScope: Equatable, Sendable {
     case application
 }
 
-/// What a cascade does, and what it leaves alone.
-public struct WindowCascadeOptions: Equatable, Sendable {
-    public let scope: WindowCascadeScope
-    /// Leaves the window you are in exactly where it is, and stacks the rest
-    /// behind it.
-    ///
-    /// The pin nobody has to configure: one window of an app is often parked
-    /// where you want it while the other ten are clutter, and which one that
-    /// is changes by the hour. Naming it in a config file cannot keep up;
-    /// being in it says so.
-    public let keepsFocused: Bool
-
-    public init(scope: WindowCascadeScope, keepsFocused: Bool = false) {
-        self.scope = scope
-        self.keepsFocused = keepsFocused
-    }
-}
-
 /// A window on the current space, as CoreGraphics reports it.
 ///
 /// Spaces are not something the accessibility API talks about: it hands over

@@ -8,6 +8,8 @@
     <string>Shorty</string>
     <key>CFBundleExecutable</key>
     <string>Shorty</string>
+    <key>CFBundleIconFile</key>
+    <string>Shorty</string>
     <key>CFBundleIdentifier</key>
     <string>dev.shorty.Shorty</string>
     <key>CFBundleInfoDictionaryVersion</key>

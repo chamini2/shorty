@@ -13,7 +13,7 @@ public enum WindowMoveCommand: Equatable, Sendable {
     /// Put the window back where it was before Shorty first moved it.
     case restore
     /// Lay the windows out in a stack, each one down and right of the last.
-    case cascade(WindowCascadeOptions)
+    case cascade(WindowCascadeScope)
 }
 
 /// Accessibility elements are CoreFoundation types: equal and hashable through
@@ -42,8 +42,8 @@ public final class WindowMover {
     public func moveFocusedWindow(_ command: WindowMoveCommand) -> ActivationResult {
         // A cascade is about every window rather than the focused one, so it
         // goes its own way from here.
-        if case let .cascade(options) = command {
-            return cascade(options)
+        if case let .cascade(scope) = command {
+            return cascade(scope)
         }
 
         let context = focusedWindowContext()
@@ -211,14 +211,14 @@ public final class WindowMover {
     /// Laid out back to front, which leaves whatever was in front still in
     /// front and still focused: a command that rearranges the screen should
     /// not also move you to another window.
-    private func cascade(_ options: WindowCascadeOptions) -> ActivationResult {
+    private func cascade(_ scope: WindowCascadeScope) -> ActivationResult {
         let ownPID = ProcessInfo.processInfo.processIdentifier
         var onScreen = OnScreenWindows.current(excluding: ownPID)
         // The topmost window, taken before anything is filtered out, is the
         // one you were in when the box opened.
         let focused = onScreen.first
 
-        if options.scope == .application {
+        if scope == .application {
             // The owner of the topmost window, not whatever `NSWorkspace`
             // calls frontmost: by the time a command runs, the box has been
             // in front and the answer is Shorty.
@@ -232,7 +232,7 @@ public final class WindowMover {
         }
 
         guard !onScreen.isEmpty else {
-            let message = options.scope == .application
+            let message = scope == .application
                 ? "That app has no windows on this desktop."
                 : "No windows on this desktop to cascade."
             console.info(message)
@@ -253,9 +253,12 @@ public final class WindowMover {
         let here = onScreen.filter { screen.contains(Self.centre(of: $0.frame)) }
         // The pinned window: left where it is, and the corner the rest flow
         // out of.
-        let pinned = options.keepsFocused ? focused.flatMap { focused in
+        // The window you are in is always the corner the rest flow out of:
+        // it is the one you were reading, and a command that tidies the
+        // screen should leave it exactly where it was.
+        let pinned = focused.flatMap { focused in
             here.first { $0.ownerPID == focused.ownerPID && $0.frame == focused.frame }
-        } : nil
+        }
         let movable = here.filter { window in
             guard let pinned else {
                 return true

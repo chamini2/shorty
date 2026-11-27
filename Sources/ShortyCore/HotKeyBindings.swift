@@ -6,6 +6,7 @@ public struct HotKeyBindings: Equatable, Sendable {
     public var clipboardMenu: KeyCombo?
     public var snippetsMenu: KeyCombo?
     public var commandBox: KeyCombo?
+    public var scratchPad: KeyCombo?
     public var switcherAllWindows: KeyCombo?
     public var switcherCurrentApp: KeyCombo?
     public var moveWindowLeftHalf: KeyCombo?
@@ -20,6 +21,7 @@ public struct HotKeyBindings: Equatable, Sendable {
         clipboardMenu: KeyCombo? = nil,
         snippetsMenu: KeyCombo? = nil,
         commandBox: KeyCombo? = nil,
+        scratchPad: KeyCombo? = nil,
         switcherAllWindows: KeyCombo? = nil,
         switcherCurrentApp: KeyCombo? = nil,
         moveWindowLeftHalf: KeyCombo? = nil,
@@ -32,6 +34,7 @@ public struct HotKeyBindings: Equatable, Sendable {
         self.clipboardMenu = clipboardMenu
         self.snippetsMenu = snippetsMenu
         self.commandBox = commandBox
+        self.scratchPad = scratchPad
         self.switcherAllWindows = switcherAllWindows
         self.switcherCurrentApp = switcherCurrentApp
         self.moveWindowLeftHalf = moveWindowLeftHalf
@@ -46,6 +49,7 @@ public struct HotKeyBindings: Equatable, Sendable {
         clipboardMenu: DefaultHotKeys.clipboardMenu,
         snippetsMenu: DefaultHotKeys.snippetsMenu,
         commandBox: DefaultHotKeys.commandBox,
+        scratchPad: DefaultHotKeys.scratchPad,
         switcherAllWindows: DefaultHotKeys.switcherAllWindows,
         switcherCurrentApp: DefaultHotKeys.switcherCurrentApp,
         moveWindowLeftHalf: DefaultHotKeys.moveWindowLeftHalf,
@@ -68,6 +72,7 @@ public struct HotKeyBindings: Equatable, Sendable {
         }
 
         append(HotKeyBindingName.clipboardMenu, clipboardMenu)
+        append(HotKeyBindingName.scratchPad, scratchPad)
         append(HotKeyBindingName.snippetsMenu, snippetsMenu)
         append(HotKeyBindingName.commandBox, commandBox)
         append(HotKeyBindingName.switcherAllWindows, switcherAllWindows)
@@ -91,7 +96,7 @@ public struct HotKeyBindings: Equatable, Sendable {
     /// Clipboard history is only reachable through these keys, so nothing is
     /// recorded when none of them is bound.
     public var clipboardCaptureEnabled: Bool {
-        clipboardMenu != nil || snippetsMenu != nil || commandBox != nil
+        clipboardMenu != nil || snippetsMenu != nil || commandBox != nil || scratchPad != nil
     }
 
     public var windowMovementEnabled: Bool {
@@ -107,6 +112,7 @@ public struct HotKeyBindings: Equatable, Sendable {
 public enum HotKeyBindingName {
     public static let clipboardMenu = "clipboard-menu"
     public static let snippetsMenu = "snippets-menu"
+    public static let scratchPad = "scratch-pad"
     public static let commandBox = "command-box"
     public static let windowSwitcher = "window-switcher"
     public static let switcherAllWindows = "window-switcher.all-windows"
@@ -122,6 +128,7 @@ public enum HotKeyBindingName {
 
 public enum DefaultHotKeys {
     public static let clipboardMenu = try! KeyCombo.parse("cmd+shift+v")
+    public static let scratchPad = try! KeyCombo.parse("cmd+shift+e")
     public static let snippetsMenu = try! KeyCombo.parse("cmd+shift+b")
     public static let commandBox = try! KeyCombo.parse("option+space")
     public static let switcherAllWindows = try! KeyCombo.parse("cmd+tab")

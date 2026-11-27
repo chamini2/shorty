@@ -51,13 +51,25 @@ public final class LinkCardStore {
 
     private let directory: URL
     private let fileManager: FileManager
-    private var records: [String: LinkCardRecord]
-    private var loaded = false
+    private let cards: LinkCardDatabase?
 
-    public init(directory: URL = LinkCardStore.defaultDirectory, fileManager: FileManager = .default) {
+    public init(
+        database: ShortyDatabase? = .shared,
+        directory: URL = LinkCardStore.defaultDirectory,
+        fileManager: FileManager = .default
+    ) {
         self.directory = directory
         self.fileManager = fileManager
-        records = [:]
+        cards = database.map { LinkCardDatabase(database: $0) }
+    }
+
+    /// A store of its own, keeping both its database and its pictures in the
+    /// given directory.
+    public convenience init(directory: URL) {
+        self.init(
+            database: try? ShortyDatabase(url: directory.appendingPathComponent("Shorty.sqlite")),
+            directory: directory
+        )
     }
 
     public static var defaultDirectory: URL {
@@ -66,16 +78,10 @@ public final class LinkCardStore {
             .appendingPathComponent("LinkCards", isDirectory: true)
     }
 
-    private var indexURL: URL {
-        directory.appendingPathComponent("Index.json")
-    }
-
     /// What is known about a link, or nothing when it was never read or has
     /// gone stale.
     public func record(for url: URL, now: Date = Date()) -> LinkCardRecord? {
-        load()
-
-        guard let record = records[key(for: url)],
+        guard let record = try? cards?.record(for: key(for: url)),
               record.isFresh(at: now, successLife: Self.successLife, failureLife: Self.failureLife) else {
             return nil
         }
@@ -99,8 +105,6 @@ public final class LinkCardStore {
         for url: URL,
         now: Date = Date()
     ) -> LinkCardRecord {
-        load()
-
         let fileName = card == nil ? nil : imageData.flatMap(write(image:))
         let record = LinkCardRecord(
             title: card?.title,
@@ -111,9 +115,8 @@ public final class LinkCardStore {
             failed: card == nil
         )
 
-        records[key(for: url)] = record
+        try? cards?.write(record, for: key(for: url))
         prune(now: now)
-        writeIndex()
 
         return record
     }
@@ -142,52 +145,20 @@ public final class LinkCardStore {
     /// Drops what has gone stale, then the oldest of what is left, then any
     /// picture nothing points at any more.
     private func prune(now: Date) {
-        records = records.filter {
-            $0.value.isFresh(at: now, successLife: Self.successLife, failureLife: Self.failureLife)
+        guard let referenced = try? cards?.prune(
+            now: now,
+            successLife: Self.successLife,
+            failureLife: Self.failureLife,
+            limit: Self.maximumRecords
+        ) else {
+            return
         }
 
-        if records.count > Self.maximumRecords {
-            let keep = records
-                .sorted { $0.value.fetchedAt > $1.value.fetchedAt }
-                .prefix(Self.maximumRecords)
-
-            records = Dictionary(uniqueKeysWithValues: keep.map { ($0.key, $0.value) })
-        }
-
-        removeOrphanedImages()
-    }
-
-    private func removeOrphanedImages() {
-        let referenced = Set(records.values.compactMap(\.imageFileName))
         let files = (try? fileManager.contentsOfDirectory(atPath: directory.path)) ?? []
 
         for file in files where file.hasSuffix(".img") && !referenced.contains(file) {
             try? fileManager.removeItem(at: directory.appendingPathComponent(file))
         }
-    }
-
-    private func load() {
-        guard !loaded else {
-            return
-        }
-
-        loaded = true
-
-        guard let data = try? Data(contentsOf: indexURL),
-              let stored = try? JSONDecoder.linkCards.decode([String: LinkCardRecord].self, from: data) else {
-            return
-        }
-
-        records = stored
-    }
-
-    private func writeIndex() {
-        guard let data = try? JSONEncoder.linkCards.encode(records) else {
-            return
-        }
-
-        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        try? data.write(to: indexURL, options: [.atomic])
     }
 
     /// Addresses differing only by fragment are the same page to a reader.
@@ -196,21 +167,5 @@ public final class LinkCardStore {
         components?.fragment = nil
 
         return components?.url?.absoluteString ?? url.absoluteString
-    }
-}
-
-private extension JSONEncoder {
-    static var linkCards: JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        return encoder
-    }
-}
-
-private extension JSONDecoder {
-    static var linkCards: JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
     }
 }

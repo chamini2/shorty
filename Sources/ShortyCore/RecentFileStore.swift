@@ -1,5 +1,25 @@
 import Foundation
 
+/// How often each app has been opened through Shorty.
+///
+/// The list of apps is alphabetical, which is predictable but puts the six
+/// you actually launch wherever their names fall. This is what lifts them.
+public final class RecentAppStore {
+    private let apps: RecentAppDatabase?
+
+    public init(database: ShortyDatabase? = .shared) {
+        apps = database.map { RecentAppDatabase(database: $0) }
+    }
+
+    public func record(_ path: String) {
+        try? apps?.record(path)
+    }
+
+    public func opens() -> [String: Int] {
+        (try? apps?.opens()) ?? [:]
+    }
+}
+
 /// The files opened through Shorty, newest first.
 ///
 /// Spotlight knows what the machine opened, but not what you reached for
@@ -11,56 +31,29 @@ public final class RecentFileStore {
     /// list rather than a second history.
     public static let limit = 20
 
-    private let fileURL: URL
-    private let fileManager: FileManager
-    private var paths: [String]?
+    private let recents: RecentFileDatabase?
 
-    public init(fileURL: URL = RecentFileStore.defaultURL, fileManager: FileManager = .default) {
-        self.fileURL = fileURL
-        self.fileManager = fileManager
+    public init(database: ShortyDatabase? = .shared) {
+        recents = database.map { RecentFileDatabase(database: $0) }
     }
 
-    public static var defaultURL: URL {
-        ClipboardHistoryStore.defaultURL
-            .deletingLastPathComponent()
-            .appendingPathComponent("RecentFiles.json")
+    /// A store of its own, rooted beside the given file.
+    public convenience init(fileURL: URL) {
+        self.init(
+            database: try? ShortyDatabase(
+                url: fileURL.deletingLastPathComponent().appendingPathComponent("Shorty.sqlite")
+            )
+        )
     }
 
     /// What was opened, newest first, skipping anything since moved away.
     public func recent() -> [String] {
-        load().filter { fileManager.fileExists(atPath: $0) }
+        (try? recents?.recent(limit: Self.limit)) ?? []
     }
 
     /// Records a file as the most recent, moving it up rather than repeating
     /// it when it was already there.
     public func record(_ path: String) {
-        var updated = load().filter { $0 != path }
-        updated.insert(path, at: 0)
-        paths = Array(updated.prefix(Self.limit))
-        write()
-    }
-
-    private func load() -> [String] {
-        if let paths {
-            return paths
-        }
-
-        let stored = (try? Data(contentsOf: fileURL))
-            .flatMap { try? JSONDecoder().decode([String].self, from: $0) } ?? []
-        paths = stored
-
-        return stored
-    }
-
-    private func write() {
-        guard let paths, let data = try? JSONEncoder().encode(paths) else {
-            return
-        }
-
-        try? fileManager.createDirectory(
-            at: fileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try? data.write(to: fileURL, options: [.atomic])
+        try? recents?.record(path, limit: Self.limit)
     }
 }
