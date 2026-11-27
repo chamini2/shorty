@@ -420,7 +420,7 @@ If `~/.shorty/config.yaml` is missing, Shorty falls back to the old `~/config/sh
 
 Shorty reloads the config automatically when you save it.
 
-After code changes, run `./build-app.sh` again, quit Shorty from the menu bar, and reopen `./dist/Shorty.app`.
+After code changes, run `./build-app.sh --install` to rebuild, replace `/Applications/Shorty.app`, and relaunch (set `SHORTY_INSTALL_DIR` to install elsewhere).
 
 ### Accessibility Permission
 

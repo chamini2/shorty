@@ -8,6 +8,16 @@ CONTENTS_DIR="${APP_DIR}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 
+INSTALL=0
+BUILD_ARGS=()
+for arg in "$@"; do
+  if [[ "${arg}" == "--install" ]]; then
+    INSTALL=1
+  else
+    BUILD_ARGS+=("${arg}")
+  fi
+done
+
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${CACHE_DIR}/clang}"
 export SWIFTPM_MODULECACHE_OVERRIDE="${SWIFTPM_MODULECACHE_OVERRIDE:-${CACHE_DIR}/swiftpm}"
 
@@ -16,9 +26,9 @@ rm -rf "${APP_DIR}"
 cd "${SCRIPT_DIR}"
 mkdir -p "${CLANG_MODULE_CACHE_PATH}" "${SWIFTPM_MODULECACHE_OVERRIDE}"
 
-"${SCRIPT_DIR}/build.sh" -c release "$@"
+"${SCRIPT_DIR}/build.sh" -c release ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}
 
-BIN_DIR="$(swift build -c release "$@" --show-bin-path)"
+BIN_DIR="$(swift build -c release ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} --show-bin-path)"
 SHORTY_BIN="${BIN_DIR}/Shorty"
 
 if [[ ! -x "${SHORTY_BIN}" ]]; then
@@ -50,3 +60,21 @@ if command -v codesign >/dev/null 2>&1; then
 fi
 
 echo "Built ${APP_DIR}"
+
+if [[ "${INSTALL}" -eq 1 ]]; then
+  INSTALL_DIR="${SHORTY_INSTALL_DIR:-/Applications}"
+  INSTALL_APP="${INSTALL_DIR}/Shorty.app"
+
+  if pgrep -x Shorty >/dev/null 2>&1; then
+    pkill -x Shorty || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      pgrep -x Shorty >/dev/null 2>&1 || break
+      sleep 0.1
+    done
+  fi
+
+  rm -rf "${INSTALL_APP}"
+  cp -R "${APP_DIR}" "${INSTALL_APP}"
+  open "${INSTALL_APP}"
+  echo "Installed and launched ${INSTALL_APP}"
+fi
