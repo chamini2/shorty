@@ -1,9 +1,10 @@
 import AppKit
 import Carbon
+import ServiceManagement
 import ShortyCore
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let controller: ShortyController
 
     private var statusItem: NSStatusItem?
@@ -16,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let shortcutsHeaderItem = NSMenuItem(title: "Shortcuts", action: nil, keyEquivalent: "")
     private let emptyShortcutsItem = NSMenuItem(title: "No shortcuts loaded", action: nil, keyEquivalent: "")
     private let keepAwakeItem = NSMenuItem(title: "Caffeinate", action: nil, keyEquivalent: "")
+    private let launchAtLoginItem = NSMenuItem(title: "Launch at Login", action: nil, keyEquivalent: "")
     private var dynamicShortcutItems: [NSMenuItem] = []
     let box = ShortyBoxController()
     private lazy var clipboardPickerPanel = ClipboardPickerPanelController(box: box)
@@ -205,6 +207,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
+        launchAtLoginItem.action = #selector(toggleLaunchAtLogin)
+        launchAtLoginItem.target = self
+        menu.addItem(launchAtLoginItem)
+        updateLaunchAtLoginItem()
+
         let accessibilityItem = NSMenuItem(
             title: "Open Accessibility Settings",
             action: #selector(openAccessibilitySettings),
@@ -221,6 +228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         quitItem.target = self
         menu.addItem(quitItem)
 
+        menu.delegate = self
         statusItem.menu = menu
     }
 
@@ -379,6 +387,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func toggleKeepAwake() {
         controller.setKeepAwake(!controller.isKeepAwakeActive)
         updateStatusIcon()
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        updateLaunchAtLoginItem()
+    }
+
+    private func updateLaunchAtLoginItem() {
+        guard Bundle.main.bundleURL.pathExtension == "app" else {
+            launchAtLoginItem.isEnabled = false
+            launchAtLoginItem.state = .off
+            launchAtLoginItem.toolTip = "Available when running as Shorty.app"
+            return
+        }
+
+        let status = SMAppService.mainApp.status
+        launchAtLoginItem.isEnabled = true
+        launchAtLoginItem.state = status == .enabled ? .on : .off
+        launchAtLoginItem.toolTip = status == .requiresApproval
+            ? "Needs approval in System Settings > General > Login Items"
+            : nil
+    }
+
+    @objc
+    private func toggleLaunchAtLogin() {
+        guard Bundle.main.bundleURL.pathExtension == "app" else {
+            return
+        }
+
+        let service = SMAppService.mainApp
+        do {
+            if service.status == .enabled {
+                try service.unregister()
+            } else {
+                try service.register()
+                if service.status == .requiresApproval {
+                    SMAppService.openSystemSettingsLoginItems()
+                }
+            }
+        } catch {
+            Console().error("Launch at Login toggle failed: \(error.localizedDescription)")
+            updateStatus("Launch at Login failed: \(error.localizedDescription)")
+        }
+
+        updateLaunchAtLoginItem()
     }
 
     /// Reads a copied link's card straight away. The setting is honoured
