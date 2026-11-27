@@ -54,20 +54,27 @@ enum CupGlyph {
         let body = bodyPath()
         body.lineWidth = halo * 2
         cut { body.stroke() }
-        body.fill()
-
-        // The opening, leaving the rim as a ring, and the coffee inside it.
-        let coffee = NSRect(
-            x: rimLeft + 36,
-            y: rimY - rimDepth / 2 + 18,
-            width: rimRight - rimLeft - 72,
-            height: rimDepth - 36
-        )
-        cut { NSBezierPath(ovalIn: coffee.insetBy(dx: -20, dy: -12)).fill() }
 
         if filled {
+            body.fill()
+
+            // The opening, leaving the rim as a ring, and the coffee inside it.
+            let coffee = NSRect(
+                x: rimLeft + 36,
+                y: rimY - rimDepth / 2 + 18,
+                width: rimRight - rimLeft - 72,
+                height: rimDepth - 36
+            )
+            cut { NSBezierPath(ovalIn: coffee.insetBy(dx: -20, dy: -12)).fill() }
             NSBezierPath(ovalIn: coffee).fill()
             steam().stroke()
+        } else {
+            // Clear the interior so the handle's endpoints don't show inside the hollow cup.
+            cut { body.fill() }
+            body.lineWidth = 44
+            body.lineCapStyle = .round
+            body.lineJoinStyle = .round
+            body.stroke()
         }
     }
 
