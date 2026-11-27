@@ -27,6 +27,8 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     private let listContainer = CommandPaletteListContainerView()
     /// Behind the rows, for lists whose entries are places: the time zones.
     private let mapView = WorldMapView(frame: .zero)
+    private let footerDivider = NSView()
+    private let footer = NSTextField(labelWithString: "")
     private var entries: [CommandEntry] = []
     private let icons = AppIconLoader()
     private var iconRefreshScheduled = false
@@ -266,10 +268,21 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         scrollView.borderType = .noBorder
         listContainer.addSubview(stackView)
 
+        footerDivider.translatesAutoresizingMaskIntoConstraints = false
+        footerDivider.wantsLayer = true
+        footerDivider.layer?.backgroundColor = NSColor(calibratedWhite: 1, alpha: 0.08).cgColor
+
+        footer.font = .systemFont(ofSize: 11)
+        footer.textColor = .secondaryLabelColor
+        footer.lineBreakMode = .byTruncatingTail
+        footer.translatesAutoresizingMaskIntoConstraints = false
+
         container.addSubview(header)
         // Added first, so the rows draw over it.
         container.addSubview(mapView)
         container.addSubview(scrollView)
+        container.addSubview(footerDivider)
+        container.addSubview(footer)
 
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.topPadding),
@@ -284,7 +297,16 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Metrics.resultTopSpacing),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.horizontalPadding),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Metrics.horizontalPadding),
-            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Metrics.resultBottomPadding),
+            scrollView.bottomAnchor.constraint(equalTo: footerDivider.topAnchor, constant: -Metrics.resultBottomPadding),
+
+            footerDivider.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.horizontalPadding),
+            footerDivider.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Metrics.horizontalPadding),
+            footerDivider.heightAnchor.constraint(equalToConstant: 1),
+            footerDivider.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -6),
+
+            footer.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            footer.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            footer.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
 
             listContainer.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
 
@@ -312,16 +334,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     }
 
     static func symbolName(for entry: CommandEntry) -> String {
-        switch entry.id {
-        case "time":
-            return "clock"
-        case "clipboard.history":
-            return "doc.on.clipboard"
-        case "window":
-            return "macwindow"
-        default:
-            return "square.grid.2x2"
-        }
+        entry.symbolName ?? "square.grid.2x2"
     }
 
     private func configureStackView() {
@@ -465,6 +478,39 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         )
     }
 
+    private func updateFooter() {
+        let selected = entries.indices.contains(selectedIndex) ? entries[selectedIndex] : nil
+        var parts: [String] = []
+
+        if let selected {
+            if selected.navigates {
+                parts.append("↩ open")
+                parts.append("→ enter")
+            } else if case .openFile = selected.action {
+                parts.append("↩ open")
+                parts.append("⌘↩ reveal")
+                parts.append("⌥↩ copy path")
+            } else if case .openApplication = selected.action {
+                parts.append("↩ open")
+                parts.append("⌘↩ reveal")
+                parts.append("⌥↩ copy path")
+            } else if case .copyText = selected.action {
+                parts.append("↩ copy")
+            } else if selected.action != nil {
+                parts.append("↩ run")
+            }
+        }
+
+        if box.depth > 1 {
+            parts.append("← back")
+        } else {
+            parts.append("⇧⌘V / ⇧⌘B insert")
+        }
+
+        parts.append(box.depth > 1 ? "esc back" : "esc close")
+        footer.stringValue = parts.joined(separator: "    ")
+    }
+
     /// Icons arrive after the rows are already on screen. Redrawing is
     /// coalesced, so two hundred arrivals cost one pass, not two hundred.
     private func scheduleIconRefresh() {
@@ -486,20 +532,19 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
 
     private func renderRows() {
         updateMap()
+        updateFooter()
 
         for view in stackView.arrangedSubviews {
             stackView.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
 
-        let detailColumnWidth = CommandPaletteEntryRowView.detailColumnWidth(for: entries)
         icons.prepare(entries.compactMap(\.iconPath))
 
         for (index, pair) in zip(entries, rowHeights).enumerated() {
             let row = CommandPaletteEntryRowView(
                 entry: pair.0,
                 isSelected: index == selectedIndex,
-                detailColumnWidth: detailColumnWidth,
                 icon: pair.0.iconPath.flatMap { icons.icon(at: $0) }
             )
             row.translatesAutoresizingMaskIntoConstraints = false
@@ -765,6 +810,8 @@ private final class CommandPaletteEntryRowView: NSView {
         static let cornerRadius: CGFloat = 6
         static let iconSize: CGFloat = 16
         static let iconSpacing: CGFloat = 7
+        static let chevronWidth: CGFloat = 12
+        static let chevronSpacing: CGFloat = 6
         /// A detailed row: two lines of text beside a larger icon.
         static let detailedIconSize: CGFloat = 30
         static let detailedHeight: CGFloat = 46
@@ -782,21 +829,7 @@ private final class CommandPaletteEntryRowView: NSView {
 
 
 
-    /// Widest single-line detail in the list, so every row reserves the same
-    /// column and the parts that vary, such as a UTC offset, line up.
-    static func detailColumnWidth(for entries: [CommandEntry]) -> CGFloat {
-        let widths = entries.compactMap { entry -> CGFloat? in
-            guard let detail = entry.detail, !detail.isEmpty, !isMultiline(detail) else {
-                return nil
-            }
-
-            return (detail as NSString).size(withAttributes: [.font: detailFont]).width
-        }
-
-        return widths.max() ?? 0
-    }
-
-    init(entry: CommandEntry, isSelected: Bool, detailColumnWidth: CGFloat = 0, icon: NSImage? = nil) {
+    init(entry: CommandEntry, isSelected: Bool, icon: NSImage? = nil) {
         super.init(frame: .zero)
 
         wantsLayer = true
@@ -816,8 +849,8 @@ private final class CommandPaletteEntryRowView: NSView {
             break
         }
 
-        let titleField = NSTextField(labelWithString: entry.navigates ? "\(entry.title) ›" : entry.title)
-        titleField.font = Self.titleFont
+        let titleField = NSTextField(labelWithString: entry.title)
+        titleField.font = isSelected ? Self.selectedTitleFont : Self.titleFont
         titleField.textColor = isSelected ? .labelColor : .secondaryLabelColor
         titleField.lineBreakMode = .byTruncatingTail
         titleField.translatesAutoresizingMaskIntoConstraints = false
@@ -827,9 +860,13 @@ private final class CommandPaletteEntryRowView: NSView {
         var textLeading = leadingAnchor
         var textInset = Metrics.horizontalPadding
 
-        if entry.iconPath != nil || entry.symbolName != nil {
+        if entry.iconPath != nil || entry.symbolName != nil || Self.isKeepAwake(entry) {
             let iconView = NSImageView()
-            iconView.image = icon
+            let picture = icon ?? Self.compactIcon(for: entry)
+            iconView.image = picture
+            iconView.contentTintColor = icon == nil
+                ? (isSelected ? .labelColor : .secondaryLabelColor)
+                : nil
             iconView.imageScaling = .scaleProportionallyUpOrDown
             iconView.translatesAutoresizingMaskIntoConstraints = false
             addSubview(iconView)
@@ -849,33 +886,48 @@ private final class CommandPaletteEntryRowView: NSView {
             titleField.leadingAnchor.constraint(equalTo: textLeading, constant: textInset),
         ])
 
+        // Reserve the trailing chevron column so right-aligned details line up
+        // whether or not a row navigates into a child view.
+        let trailingInset = Metrics.horizontalPadding + Metrics.chevronWidth + Metrics.chevronSpacing
+
+        if entry.navigates {
+            let chevronField = NSTextField(labelWithString: "›")
+            chevronField.font = .systemFont(ofSize: 14, weight: .regular)
+            chevronField.textColor = isSelected ? .secondaryLabelColor : .tertiaryLabelColor
+            chevronField.alignment = .right
+            chevronField.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(chevronField)
+
+            NSLayoutConstraint.activate([
+                chevronField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
+                chevronField.centerYAnchor.constraint(equalTo: centerYAnchor),
+                chevronField.widthAnchor.constraint(equalToConstant: Metrics.chevronWidth),
+            ])
+        }
+
         guard let detail = entry.detail, !detail.isEmpty else {
-            titleField.topAnchor.constraint(equalTo: topAnchor, constant: Metrics.topPadding).isActive = true
-            titleField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding).isActive = true
+            titleField.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
+            titleField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingInset).isActive = true
             return
         }
 
         let detailField = NSTextField(labelWithString: detail)
         detailField.font = Self.detailFont
-        detailField.textColor = .secondaryLabelColor
+        detailField.textColor = isSelected ? .secondaryLabelColor : .tertiaryLabelColor
         detailField.lineBreakMode = .byTruncatingTail
         detailField.translatesAutoresizingMaskIntoConstraints = false
         addSubview(detailField)
 
-        // One-line details sit beside the title, which keeps lists such as the
-        // time zones compact. Only multi-line results need their own block.
+        // One-line details sit right-aligned beside the title; multi-line
+        // results stack underneath.
         guard Self.isMultiline(detail) else {
-            // Left aligned inside a fixed column: right aligning each label
-            // separately is what left the clocks ragged, since the offset
-            // after them differs in width.
-            detailField.alignment = .left
+            detailField.alignment = .right
             detailField.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
             NSLayoutConstraint.activate([
                 titleField.centerYAnchor.constraint(equalTo: centerYAnchor),
                 detailField.centerYAnchor.constraint(equalTo: centerYAnchor),
-                detailField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
-                detailField.widthAnchor.constraint(equalToConstant: ceil(detailColumnWidth)),
+                detailField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingInset),
                 detailField.leadingAnchor.constraint(
                     greaterThanOrEqualTo: titleField.trailingAnchor,
                     constant: Metrics.detailSpacing
@@ -894,6 +946,28 @@ private final class CommandPaletteEntryRowView: NSView {
             detailField.leadingAnchor.constraint(equalTo: titleField.leadingAnchor),
             detailField.trailingAnchor.constraint(equalTo: titleField.trailingAnchor),
         ])
+    }
+
+    private static func isKeepAwake(_ entry: CommandEntry) -> Bool {
+        if case .setKeepAwake = entry.action {
+            return true
+        }
+        return false
+    }
+
+    private static func compactIcon(for entry: CommandEntry) -> NSImage? {
+        if case let .setKeepAwake(enabling) = entry.action {
+            return StatusIcon.cup(filled: !enabling)
+        }
+
+        return entry.symbolName.flatMap(compactSymbol)
+    }
+
+    private static func compactSymbol(_ name: String) -> NSImage? {
+        NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(
+                NSImage.SymbolConfiguration(pointSize: Metrics.iconSize - 3, weight: .regular)
+            )
     }
 
     private static func symbol(_ name: String) -> NSImage? {
@@ -1093,7 +1167,8 @@ private final class CommandPaletteEntryRowView: NSView {
     }
 
     private static let titleFont = NSFont.systemFont(ofSize: Metrics.titleFontSize, weight: .regular)
-    private static let detailFont = NSFont.monospacedSystemFont(ofSize: Metrics.detailFontSize, weight: .regular)
+    private static let selectedTitleFont = NSFont.systemFont(ofSize: Metrics.titleFontSize, weight: .medium)
+    private static let detailFont = NSFont.systemFont(ofSize: Metrics.detailFontSize, weight: .regular)
 }
 
 

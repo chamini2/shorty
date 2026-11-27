@@ -408,9 +408,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showCommandPalette() {
-        // Same hotkey suspends a command-box session (keeping the stack and
-        // unsubmitted search text); reopening resumes it or starts fresh.
-        if box.isVisible && box.activeSession == .commandBox {
+        // The command-box hotkey always hides the box when visible, whatever
+        // session is showing, preserving any unsubmitted draft.
+        if box.isVisible {
             box.suspend()
             return
         }

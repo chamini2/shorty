@@ -34,6 +34,8 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     private let tableView = ClipboardPickerTableView()
     private let scrollView = ClipboardPickerScrollView()
     private let detailView = ClipboardPickerDetailView()
+    private let footerDivider = NSView()
+    private let footer = NSTextField(labelWithString: "")
 
     var showsLinkPreviews = true {
         didSet {
@@ -259,7 +261,14 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         divider.wantsLayer = true
         divider.layer?.backgroundColor = NSColor(calibratedWhite: 1, alpha: 0.08).cgColor
 
-        for view in [header, scrollView, divider, detailView] as [NSView] {
+        footerDivider.wantsLayer = true
+        footerDivider.layer?.backgroundColor = NSColor(calibratedWhite: 1, alpha: 0.08).cgColor
+
+        footer.font = .systemFont(ofSize: 11)
+        footer.textColor = .secondaryLabelColor
+        footer.lineBreakMode = .byTruncatingTail
+
+        for view in [header, scrollView, divider, detailView, footerDivider, footer] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(view)
         }
@@ -272,17 +281,26 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
             scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Metrics.searchBottomSpacing),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.widthAnchor.constraint(equalToConstant: Metrics.listWidth),
-            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Metrics.bottomPadding),
+            scrollView.bottomAnchor.constraint(equalTo: footerDivider.topAnchor, constant: -Metrics.bottomPadding),
 
             divider.leadingAnchor.constraint(equalTo: scrollView.trailingAnchor),
             divider.widthAnchor.constraint(equalToConstant: Metrics.dividerWidth),
             divider.topAnchor.constraint(equalTo: scrollView.topAnchor),
-            divider.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            divider.bottomAnchor.constraint(equalTo: footerDivider.topAnchor),
 
             detailView.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
             detailView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             detailView.topAnchor.constraint(equalTo: scrollView.topAnchor),
-            detailView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            detailView.bottomAnchor.constraint(equalTo: footerDivider.topAnchor),
+
+            footerDivider.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
+            footerDivider.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
+            footerDivider.heightAnchor.constraint(equalToConstant: 1),
+            footerDivider.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -6),
+
+            footer.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            footer.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            footer.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
         ])
     }
 
@@ -293,6 +311,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
 
     /// Names the section on screen, down to the snippet folder you opened.
     private func updateHeader() {
+        updateFooter()
         if let currentFolder {
             header.update(title: currentFolder.title, symbolName: "folder")
             return
@@ -303,6 +322,22 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
             title: title,
             symbolName: mode == .snippetsOnly ? "text.quote" : "doc.on.clipboard"
         )
+    }
+
+    private func updateFooter() {
+        var parts: [String] = []
+        if closesBoxOnSelect {
+            parts = ["↩ paste", "⌘↩ copy", "⌥↩ plain", "⇧↩ join", "⇧⌘E scratch pad", "⇧⌫ delete"]
+        } else {
+            parts = ["↩ insert"]
+        }
+
+        if currentFolder != nil {
+            parts.append("← back")
+        }
+
+        parts.append(closesBoxOnSelect ? "esc close" : "esc back")
+        footer.stringValue = parts.joined(separator: "    ")
     }
 
     private func configureTable() {

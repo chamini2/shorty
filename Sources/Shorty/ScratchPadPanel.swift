@@ -182,11 +182,16 @@ final class ScratchPadPanelController: NSObject, ShortyBoxContent, NSTextViewDel
 
         configureTextView()
 
+        let footerDivider = NSView()
+        footerDivider.translatesAutoresizingMaskIntoConstraints = false
+        footerDivider.wantsLayer = true
+        footerDivider.layer?.backgroundColor = NSColor(calibratedWhite: 1, alpha: 0.08).cgColor
+
         footer.font = .systemFont(ofSize: 11)
         footer.textColor = .secondaryLabelColor
         footer.translatesAutoresizingMaskIntoConstraints = false
 
-        [header, scrollView, footer].forEach(contentView.addSubview)
+        [header, scrollView, footerDivider, footer].forEach(contentView.addSubview)
 
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Metrics.topPadding),
@@ -196,11 +201,16 @@ final class ScratchPadPanelController: NSObject, ShortyBoxContent, NSTextViewDel
             scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Metrics.headerSpacing),
             scrollView.leadingAnchor.constraint(equalTo: header.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: footerDivider.topAnchor, constant: -Metrics.headerSpacing),
 
-            footer.topAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: Metrics.headerSpacing),
-            footer.leadingAnchor.constraint(equalTo: header.leadingAnchor),
-            footer.trailingAnchor.constraint(equalTo: header.trailingAnchor),
-            footer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Metrics.bottomPadding),
+            footerDivider.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+            footerDivider.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+            footerDivider.heightAnchor.constraint(equalToConstant: 1),
+            footerDivider.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -6),
+
+            footer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            footer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            footer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
         ])
     }
 

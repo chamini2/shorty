@@ -298,49 +298,56 @@ public enum CommandCatalog {
                 title: "Applications",
                 detail: applications.isEmpty ? "None found" : "\(applications.count) installed",
                 destination: .list(applicationEntries(applications, opens: applicationOpens)),
-                keywords: ["app", "apps", "open", "launch", "run"]
+                keywords: ["app", "apps", "open", "launch", "run"],
+                symbolName: "square.grid.2x2"
             ),
             CommandEntry(
                 id: "scratch-pad",
                 title: "Scratch Pad",
-                detail: "Work text over before copying it out",
+                detail: "Plain-text draft",
                 destination: .view(.scratchPad),
-                keywords: ["scratch", "edit", "draft", "note", "text", "format", "pad"]
+                keywords: ["scratch", "edit", "draft", "note", "text", "format", "pad"],
+                symbolName: "square.and.pencil"
             ),
             CommandEntry(
                 id: "files",
                 title: "Files",
-                detail: "Search your home folder",
+                detail: "Search home folder",
                 destination: .search(.files),
-                keywords: ["file", "find", "spotlight", "document", "folder", "open"]
+                keywords: ["file", "find", "spotlight", "document", "folder", "open"],
+                symbolName: "folder"
             ),
             CommandEntry(
                 id: "clipboard.history",
                 title: "Clipboard History",
                 detail: history.isEmpty ? "Nothing copied yet" : "\(history.count) entries",
                 destination: .view(.clipboard(.combined)),
-                keywords: ["paste", "copy", "clipboard", "snippet"]
+                keywords: ["paste", "copy", "clipboard", "snippet"],
+                symbolName: "doc.on.clipboard"
             ),
             CommandEntry(
                 id: "time",
                 title: "Time",
-                detail: "Current time around the world",
+                detail: "World clocks",
                 destination: .search(.timeZones),
-                keywords: ["clock", "timezone", "zone"]
-            ),
-            CommandEntry(
-                id: "keep-awake",
-                title: keepAwake ? "Let the Mac Sleep" : "Keep the Mac Awake",
-                detail: keepAwake ? "On, sleep is held off" : "Off",
-                action: .setKeepAwake(!keepAwake),
-                keywords: ["caffeine", "caffeinate", "sleep", "awake", "insomnia", "screensaver"]
+                keywords: ["clock", "timezone", "zone"],
+                symbolName: "clock"
             ),
             CommandEntry(
                 id: "window",
                 title: "Window",
-                detail: "Move the focused window",
+                detail: "Arrange focused window",
                 destination: .list(windowEntries(screenCount: screenCount)),
-                keywords: ["layout", "position", "arrange"]
+                keywords: ["layout", "position", "arrange"],
+                symbolName: "macwindow"
+            ),
+            CommandEntry(
+                id: "keep-awake",
+                title: keepAwake ? "Let the Mac Sleep" : "Keep the Mac Awake",
+                detail: keepAwake ? "On" : "Off",
+                action: .setKeepAwake(!keepAwake),
+                keywords: ["caffeine", "caffeinate", "sleep", "awake", "insomnia", "screensaver"],
+                symbolName: keepAwake ? "cup.and.saucer.fill" : "cup.and.saucer"
             ),
         ]
     }
