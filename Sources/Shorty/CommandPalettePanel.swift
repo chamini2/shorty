@@ -40,10 +40,9 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     private let search: CommandSearchKind?
     private let fileSearcher = FileSearcher()
     private let recentFiles = RecentFileStore()
-    private var isPresentingNestedPicker = false
     private var pendingInsertionRange: NSRange?
     private var selectionRangeAfterRefocus: NSRange?
-    var pickerRequestHandler: ((ClipboardMenuKind) -> Void)?
+    var pickerRequestHandler: ((ClipboardMenuKind, CommandPalettePanelController) -> Void)?
     var actionHandler: ((CommandAction) -> Void)?
     /// Supplies the bespoke views a list cannot render, such as the picker.
     var viewProvider: ((CommandViewKind) -> ShortyBoxContent?)?
@@ -90,12 +89,23 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
 
     // MARK: ShortyBoxContent
 
+    var route: ShortyBoxRoute {
+        if let search {
+            return .commandSearch(search)
+        }
+
+        if let listTitle {
+            return .commandList(listTitle)
+        }
+
+        return .commandRoot
+    }
+
     var view: NSView {
         contentView
     }
 
     func boxDidPresent(in window: NSWindow) {
-        isPresentingNestedPicker = false
         window.makeFirstResponder(searchField)
         updateHeader()
         updateResults()
@@ -103,7 +113,6 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     }
 
     func boxDidDismiss() {
-        isPresentingNestedPicker = false
         pendingInsertionRange = nil
     }
 
@@ -142,26 +151,22 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         // be repeated with the hotkey and return alone. Typing replaces it,
         // since the text comes up selected.
         let offered = offeredAgain()
-        searchField.stringValue = offered?.query ?? ""
-        selectedEntryIDBeforePush = offered?.entryID
-        selectionRangeAfterRefocus = nil
-        updateHeader()
-        updateResults()
-        resizePanel()
-
-        box.open(self)
+        box.open(self) {
+            self.searchField.stringValue = offered?.query ?? ""
+            self.selectedEntryIDBeforePush = offered?.entryID
+            self.selectionRangeAfterRefocus = nil
+            self.updateHeader()
+            self.updateResults()
+            self.resizePanel()
+        }
         searchField.currentEditor()?.selectAll(nil)
     }
 
-
-
     func hide() {
-        isPresentingNestedPicker = false
         box.close()
     }
 
     func insertTextFromPicker(_ text: String) {
-        isPresentingNestedPicker = false
         replaceSelectedText(with: text, fallbackRange: pendingInsertionRange)
         pendingInsertionRange = nil
         resizePanel()
@@ -172,22 +177,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     }
 
     func cancelNestedPicker() {
-        isPresentingNestedPicker = false
         pendingInsertionRange = nil
-    }
-
-    func requestNestedPickerFromHotKey(_ kind: ClipboardMenuKind) -> Bool {
-        guard isPresented else {
-            isPresentingNestedPicker = false
-            return false
-        }
-
-        if isPresentingNestedPicker {
-            return true
-        }
-
-        requestNestedPicker(kind)
-        return true
     }
 
     func controlTextDidChange(_ notification: Notification) {
@@ -227,7 +217,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             return true
 
         case #selector(NSResponder.moveLeft(_:)):
-            guard box.depth > 1 else {
+            guard box.depth > 1, caretIsAtStartOfQuery else {
                 return false
             }
 
@@ -632,20 +622,14 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     private func open(_ destination: CommandDestination, from entry: CommandEntry) {
         switch destination {
         case let .list(entries):
-            let list = CommandPalettePanelController(
-                box: box,
-                listEntries: entries,
-                title: entry.title,
-                symbolName: Self.symbolName(for: entry)
+            box.push(
+                makeChildPalette(
+                    listEntries: entries,
+                    title: entry.title,
+                    symbolName: Self.symbolName(for: entry),
+                    search: nil
+                )
             )
-            list.settings = settings
-            list.history = history
-            list.applications = applications
-            list.applicationOpens = applicationOpens
-            list.actionHandler = actionHandler
-            list.pickerRequestHandler = pickerRequestHandler
-            list.viewProvider = viewProvider
-            box.push(list)
 
         case let .view(kind):
             guard let content = viewProvider?(kind) else {
@@ -656,21 +640,38 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             box.push(content)
 
         case let .search(kind):
-            let list = CommandPalettePanelController(
-                box: box,
-                listEntries: [],
-                title: entry.title,
-                symbolName: Self.symbolName(for: entry),
-                search: kind
+            box.push(
+                makeChildPalette(
+                    listEntries: [],
+                    title: entry.title,
+                    symbolName: Self.symbolName(for: entry),
+                    search: kind
+                )
             )
-            list.settings = settings
-            list.history = history
-            list.applications = applications
-            list.actionHandler = actionHandler
-            list.pickerRequestHandler = pickerRequestHandler
-            list.viewProvider = viewProvider
-            box.push(list)
         }
+    }
+
+    private func makeChildPalette(
+        listEntries: [CommandEntry],
+        title: String,
+        symbolName: String,
+        search: CommandSearchKind?
+    ) -> CommandPalettePanelController {
+        let list = CommandPalettePanelController(
+            box: box,
+            listEntries: listEntries,
+            title: title,
+            symbolName: symbolName,
+            search: search
+        )
+        list.settings = settings
+        list.history = history
+        list.applications = applications
+        list.applicationOpens = applicationOpens
+        list.actionHandler = actionHandler
+        list.pickerRequestHandler = pickerRequestHandler
+        list.viewProvider = viewProvider
+        return list
     }
 
     private func resizePanel() {
@@ -702,14 +703,13 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
 
 
 
-    private func requestNestedPicker(_ kind: ClipboardMenuKind) {
+    func requestNestedPicker(_ kind: ClipboardMenuKind) {
         guard let pickerRequestHandler else {
             return
         }
 
         pendingInsertionRange = selectedRange()
-        isPresentingNestedPicker = true
-        pickerRequestHandler(kind)
+        pickerRequestHandler(kind, self)
     }
 
     private func replaceSelectedText(with text: String, fallbackRange: NSRange?) {
@@ -725,6 +725,15 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             selectionRangeAfterRefocus = newSelectionRange
         }
         setSelectedRange(newSelectionRange)
+    }
+
+    private var caretIsAtStartOfQuery: Bool {
+        guard !searchField.stringValue.isEmpty else {
+            return true
+        }
+
+        let range = selectedRange()
+        return range.location == 0 && range.length == 0
     }
 
     private var caretIsAtEndOfQuery: Bool {

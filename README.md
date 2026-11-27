@@ -265,11 +265,10 @@ workbench — every intermediate step overwrites the thing being worked on — s
 something in, reshape it, and copy out the version you wanted. The command box
 reaches it too, as `Scratch Pad`.
 
-Inside the clipboard picker, `right` sends the selected entry to the pad, the
-same way it steps into a snippet folder; `escape` comes back to the picker. The
-pad's own hotkey does it too when an entry is selected. Text is added after
-what is already there rather than replacing it, so the pad can collect several
-pieces.
+Inside the clipboard picker, the pad's hotkey (`cmd+shift+e`) sends the
+selected entry to the pad; `escape` comes back to the picker. Text is added
+after what is already there rather than replacing it, so the pad can collect
+several pieces.
 
 | Key | Does |
 | --- | --- |

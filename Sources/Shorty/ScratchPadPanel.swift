@@ -50,6 +50,10 @@ final class ScratchPadPanelController: NSObject, ShortyBoxContent, NSTextViewDel
 
     // MARK: ShortyBoxContent
 
+    var route: ShortyBoxRoute {
+        .scratchPad
+    }
+
     var view: NSView {
         contentView
     }

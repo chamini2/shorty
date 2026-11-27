@@ -2,11 +2,25 @@ import AppKit
 import Carbon
 import ShortyCore
 
+enum ClipboardPickerPurpose: Equatable {
+    case paste
+    case insert
+}
+
+enum ShortyBoxRoute: Equatable {
+    case commandRoot
+    case commandList(String)
+    case commandSearch(CommandSearchKind)
+    case clipboard(ClipboardMenuKind, purpose: ClipboardPickerPurpose)
+    case scratchPad
+}
+
 /// Anything the box can show: the command list, a list of times, the clipboard
 /// picker. Each supplies a view and handles its own keys; the box handles the
 /// window and the navigation between them.
 @MainActor
 protocol ShortyBoxContent: AnyObject {
+    var route: ShortyBoxRoute { get }
     var view: NSView { get }
 
     /// Called before the content is shown, so it can refresh and focus.
@@ -76,19 +90,39 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         stack.count
     }
 
+    var topContent: ShortyBoxContent? {
+        panel.isVisible ? stack.last : nil
+    }
+
+    var topRoute: ShortyBoxRoute? {
+        topContent?.route
+    }
+
+    var rootRoute: ShortyBoxRoute? {
+        panel.isVisible ? stack.first?.route : nil
+    }
+
     func isPresenting(_ content: ShortyBoxContent) -> Bool {
         panel.isVisible && stack.last === content
     }
 
     /// Shows `content` as the only thing on the stack, opening the box.
-    func open(_ content: ShortyBoxContent) {
-        stack.forEach { $0.boxDidDismiss() }
+    /// Runs `prepare` after dismissing the previous stack so reused content
+    /// controllers do not have their fresh state wiped by their own dismissal.
+    func open(_ content: ShortyBoxContent, prepare: () -> Void = {}) {
+        let dismissed = stack.reversed()
         stack = []
+        dismissed.forEach { $0.boxDidDismiss() }
+        prepare()
         push(content)
     }
 
     /// Shows `content` above what is already there, keeping the window as is.
     func push(_ content: ShortyBoxContent) {
+        guard !stack.contains(where: { $0 === content }) else {
+            return
+        }
+
         stack.append(content)
         install(content)
     }
@@ -112,8 +146,9 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
     }
 
     func close() {
-        stack.forEach { $0.boxDidDismiss() }
+        let dismissed = stack.reversed()
         stack = []
+        dismissed.forEach { $0.boxDidDismiss() }
         panel.orderOut(nil)
     }
 
@@ -126,6 +161,15 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
+        guard panel.isVisible else {
+            return
+        }
+
+        close()
+    }
+
+    @objc
+    private func activeSpaceDidChange(_ notification: Notification) {
         guard panel.isVisible else {
             return
         }
@@ -192,6 +236,12 @@ final class ShortyBoxController: NSObject, NSWindowDelegate {
         panel.escapeHandler = { [weak self] in
             self?.handleEscape()
         }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(activeSpaceDidChange),
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil
+        )
 
         container.material = .popover
         // Blurs what is behind the window, not merely what is behind the

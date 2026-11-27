@@ -32,8 +32,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let applicationIndex = ApplicationIndex()
     private let recentFiles = RecentFileStore()
     private let recentApps = RecentAppStore()
-    private var presentedPickerKind: ClipboardMenuKind?
-    private var commandPaletteTargetApplication: NSRunningApplication?
     private lazy var commandPalettePanel = CommandPalettePanelController(box: box)
     private let windowSwitcherPanel = WindowSwitcherPanelController()
 
@@ -74,8 +72,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.prefetchLinkPreview(for: item)
             }
         }
-        commandPalettePanel.pickerRequestHandler = { [weak self] kind in
-            self?.showCommandInsertionPicker(kind)
+        commandPalettePanel.pickerRequestHandler = { [weak self] kind, palette in
+            self?.showCommandInsertionPicker(kind, for: palette)
         }
         controller.commandBoxSettingsHandler = { [weak self] settings in
             DispatchQueue.main.async {
@@ -91,11 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case let .clipboard(menuKind):
                 // Prepared but not presented: the box pushes it, which keeps
                 // escape popping back to the command list.
-                presentedPickerKind = menuKind
-                prepareClipboardPicker(
-                    menuKind,
-                    targetApplication: commandPaletteTargetApplication
-                )
+                prepareClipboardPicker(menuKind)
                 return clipboardPickerPanel
 
             case .scratchPad:
@@ -123,8 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        clipboardPickerPanel.hide()
-        commandPalettePanel.hide()
+        box.close()
         controller.stop()
     }
 
@@ -414,17 +407,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showCommandPalette() {
-        // The same hotkey closes the box, whatever it happens to be showing.
-        // Asking the command box whether it is presented was not the same
-        // question: with the picker on top it answered no, and the key opened
-        // the command box over it rather than putting the box away.
-        if box.isVisible {
+        // Same hotkey closes a command-box session (even when drilled into a
+        // child view); from any other top-level view, switch to the box in-place.
+        if box.rootRoute == .commandRoot {
             box.close()
             return
         }
 
-        // Captured before the box takes focus, so a paste lands where it was.
-        commandPaletteTargetApplication = Self.currentPasteTargetApplication()
         commandPalettePanel.history = controller.recentClipboardItems()
         commandPalettePanel.keepAwake = controller.isKeepAwakeActive
         commandPalettePanel.applications = applicationIndex.current()
@@ -444,17 +433,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// One key for the pad, wherever it is pressed.
     ///
-    /// With the picker open and an entry under the cursor, that entry is
-    /// what the pad should open on; anywhere else the key opens and closes
-    /// the pad as any other hotkey does. Two keys to maintain for one idea
-    /// is one too many.
+    /// With the standalone picker open and an entry under the cursor, that
+    /// entry is sent to the pad; when the pad is already on top, the hotkey
+    /// closes it; from anywhere else, switch to the pad in-place.
     private func showScratchPad() {
-        if box.isPresenting(clipboardPickerPanel), let text = clipboardPickerPanel.selectedTextForScratchPad {
+        if case .clipboard(_, purpose: .paste) = box.topRoute,
+           let text = clipboardPickerPanel.selectedTextForScratchPad {
             sendToScratchPad(text)
             return
         }
 
-        if box.isVisible {
+        if box.topRoute == .scratchPad {
             box.close()
             return
         }
@@ -463,46 +452,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleClipboardMenuHotKey(_ kind: ClipboardMenuKind) {
-        if commandPalettePanel.requestNestedPickerFromHotKey(kind) {
+        if let palette = box.topContent as? CommandPalettePanelController {
+            palette.requestNestedPicker(kind)
             return
         }
 
-        // The same hotkey closes the picker; the other one switches to it.
-        if clipboardPickerPanel.isPresented {
-            clipboardPickerPanel.hide()
-
-            if presentedPickerKind == kind {
-                presentedPickerKind = nil
-                return
+        if case let .clipboard(activeKind, purpose: .insert) = box.topRoute {
+            if activeKind == kind {
+                box.pop()
+            } else {
+                clipboardPickerPanel.switchMode(Self.pickerMode(for: kind))
             }
+            return
         }
 
-        presentedPickerKind = kind
+        if box.topRoute == .clipboard(kind, purpose: .paste) {
+            box.close()
+            return
+        }
+
         showClipboardPicker(kind)
     }
 
-    private func showCommandInsertionPicker(_ kind: ClipboardMenuKind) {
-        let mode: ClipboardPickerMode
-        switch kind {
-        case .combined:
-            mode = .all
-        case .snippets:
-            mode = .snippetsOnly
-        }
-
+    private func showCommandInsertionPicker(
+        _ kind: ClipboardMenuKind,
+        for palette: CommandPalettePanelController
+    ) {
+        clipboardPickerPanel.showsLinkPreviews = controller.loadedClipboardSettings.linkPreviewsEnabled
         clipboardPickerPanel.show(
-            mode: mode,
+            mode: Self.pickerMode(for: kind),
             history: controller.recentClipboardItems(),
             snippetGroups: controller.currentSnippetGroups(),
             closesBoxOnSelect: false,
-            onSelect: { [weak self] result, _ in
-                self?.commandPalettePanel.insertTextFromPicker(Self.text(for: result))
+            onSelect: { [weak palette] result, _ in
+                palette?.insertTextFromPicker(Self.text(for: result))
             },
-            onCancel: { [weak self] in
-                self?.commandPalettePanel.cancelNestedPicker()
+            onCancel: { [weak palette] in
+                palette?.cancelNestedPicker()
             }
         )
         box.push(clipboardPickerPanel)
+    }
+
+    private static func pickerMode(for kind: ClipboardMenuKind) -> ClipboardPickerMode {
+        switch kind {
+        case .combined:
+            return .all
+        case .snippets:
+            return .snippetsOnly
+        }
     }
 
     private static func text(for result: ClipboardPickerResult) -> String {
@@ -603,42 +601,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showClipboardPicker(_ kind: ClipboardMenuKind) {
-        prepareClipboardPicker(kind)
-        box.open(clipboardPickerPanel)
+        box.open(clipboardPickerPanel) {
+            self.prepareClipboardPicker(kind)
+        }
     }
 
     /// Fills the picker in without showing it, so either the hotkey or the
     /// command box can decide how it appears.
-    private func prepareClipboardPicker(
-        _ kind: ClipboardMenuKind,
-        targetApplication capturedTarget: NSRunningApplication? = nil
-    ) {
-        let mode: ClipboardPickerMode
-        switch kind {
-        case .combined:
-            mode = .all
-        case .snippets:
-            mode = .snippetsOnly
-        }
-
+    private func prepareClipboardPicker(_ kind: ClipboardMenuKind) {
         clipboardPickerPanel.showsLinkPreviews = controller.loadedClipboardSettings.linkPreviewsEnabled
-        clipboardPickerPanel.scratchPadHandler = { [weak self] text in
-            self?.sendToScratchPad(text)
-        }
-        let targetApplication = capturedTarget ?? Self.currentPasteTargetApplication()
         clipboardPickerPanel.show(
-            mode: mode,
+            mode: Self.pickerMode(for: kind),
             history: controller.recentClipboardItems(),
             snippetGroups: controller.currentSnippetGroups(),
             onSelect: { [weak self] result, activationMode in
                 self?.pastePickerResult(
                     result,
-                    activationMode: activationMode,
-                    targetApplication: targetApplication
+                    activationMode: activationMode
                 )
-            },
-            onCancel: {
-                Self.reactivate(targetApplication)
             },
             onDelete: { [weak self] item in
                 self?.controller.deleteClipboardItem(item)
@@ -648,11 +628,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func pastePickerResult(
         _ result: ClipboardPickerResult,
-        activationMode: ClipboardPickerActivationMode,
-        targetApplication: NSRunningApplication?
+        activationMode: ClipboardPickerActivationMode
     ) {
-        Self.reactivate(targetApplication)
-
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
             guard let self else {
                 return
@@ -680,23 +657,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private static func currentPasteTargetApplication() -> NSRunningApplication? {
-        let currentApplication = NSWorkspace.shared.frontmostApplication
-
-        guard currentApplication?.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
-            return nil
-        }
-
-        return currentApplication
-    }
-
-    private static func reactivate(_ application: NSRunningApplication?) {
-        application?.activate(options: [.activateIgnoringOtherApps])
-    }
-
     private func handleWindowSwitcherUpdate(_ update: WindowSwitcherUpdate) {
         switch update {
         case let .show(snapshot):
+            box.close()
             windowSwitcherPanel.show(snapshot)
         case let .update(snapshot):
             windowSwitcherPanel.update(snapshot)

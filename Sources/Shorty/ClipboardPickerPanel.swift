@@ -52,8 +52,6 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     private var onCancel: (() -> Void)?
     private var onDelete: ((ClipboardItem) -> Void)?
     private var closesBoxOnSelect = true
-    /// Hands text to the scratch pad and shows it.
-    var scratchPadHandler: ((String) -> Void)?
     private var sourceIconCache: [String: NSImage] = [:]
     private var thumbnailCache: [String: NSImage] = [:]
     private let assetStore = ClipboardAssetStore()
@@ -80,6 +78,12 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     }
 
     // MARK: ShortyBoxContent
+
+    var route: ShortyBoxRoute {
+        let kind: ClipboardMenuKind = mode == .snippetsOnly ? .snippets : .combined
+        let purpose: ClipboardPickerPurpose = closesBoxOnSelect ? .paste : .insert
+        return .clipboard(kind, purpose: purpose)
+    }
 
     var view: NSView {
         contentView
@@ -109,11 +113,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         let handler = onCancel
         onSelect = nil
         onCancel = nil
-
-        // Only the outermost dismissal means "nothing was picked".
-        if box.depth == 0 {
-            handler?()
-        }
+        handler?()
     }
 
     /// Escape clears what you typed first, then leaves a folder, then lets
@@ -135,7 +135,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         snippetGroups: [SnippetGroup],
         closesBoxOnSelect: Bool = true,
         onSelect: @escaping (ClipboardPickerResult, ClipboardPickerActivationMode) -> Void,
-        onCancel: @escaping () -> Void,
+        onCancel: (() -> Void)? = nil,
         onDelete: ((ClipboardItem) -> Void)? = nil
     ) {
         self.mode = mode
@@ -150,6 +150,15 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         searchField.stringValue = ""
         updateHeader()
 
+        applyFilter(resetSelection: true)
+    }
+
+    func switchMode(_ mode: ClipboardPickerMode) {
+        self.mode = mode
+        currentFolder = nil
+        query = ""
+        searchField.stringValue = ""
+        updateHeader()
         applyFilter(resetSelection: true)
     }
 
@@ -317,10 +326,18 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
             return true
 
         case #selector(NSResponder.moveLeft(_:)):
+            guard caretIsAtStartOfQuery else {
+                return false
+            }
+
             return leaveFolderIfNeeded()
 
         case #selector(NSResponder.moveRight(_:)):
-            return stepIntoSelected()
+            guard caretIsAtEndOfQuery else {
+                return false
+            }
+
+            return enterSelectedFolderIfNeeded()
 
         case #selector(NSResponder.deleteBackward(_:)),
             #selector(NSResponder.deleteForward(_:)):
@@ -456,7 +473,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
             return leaveFolderIfNeeded()
 
         case UInt32(kVK_RightArrow):
-            return stepIntoSelected()
+            return enterSelectedFolderIfNeeded()
 
         case UInt32(kVK_Delete), UInt32(kVK_ForwardDelete):
             // Shift, not command: `cmd+backspace` means "delete to the start
@@ -481,20 +498,26 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         }
     }
 
-    /// Right steps into the selected row: a folder opens, and an entry —
-    /// which has no inside of its own — goes to the scratch pad to be worked
-    /// over. Escape comes back from either.
-    private func stepIntoSelected() -> Bool {
-        if enterSelectedFolderIfNeeded() {
+    private var caretIsAtStartOfQuery: Bool {
+        let text = searchField.stringValue
+        guard !text.isEmpty else {
             return true
         }
 
-        guard let text = selectedTextForScratchPad else {
+        guard let range = searchField.currentEditor()?.selectedRange else {
             return false
         }
 
-        scratchPadHandler?(text)
-        return true
+        return range.location == 0 && range.length == 0
+    }
+
+    private var caretIsAtEndOfQuery: Bool {
+        let length = (searchField.stringValue as NSString).length
+        guard let range = searchField.currentEditor()?.selectedRange else {
+            return true
+        }
+
+        return range.location + range.length >= length
     }
 
     /// What is selected, for the scratch pad to open on.
