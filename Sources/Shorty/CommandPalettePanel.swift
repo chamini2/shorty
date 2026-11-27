@@ -151,6 +151,12 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
             return true
         }
 
+        if (UInt32(event.keyCode) == UInt32(kVK_Return) || UInt32(event.keyCode) == UInt32(kVK_ANSI_KeypadEnter)),
+           flags.contains(.command) {
+            activateSelection(modifierFlags: flags)
+            return true
+        }
+
         return false
     }
 
@@ -206,9 +212,13 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         doCommandBy commandSelector: Selector
     ) -> Bool {
         switch commandSelector {
-        case #selector(NSResponder.insertNewline(_:)),
-            #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+        case #selector(NSResponder.insertNewline(_:)):
             activateSelection()
+            return true
+
+        case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+            let flags = (NSApp.currentEvent?.modifierFlags ?? NSEvent.modifierFlags).union(.option)
+            activateSelection(modifierFlags: flags)
             return true
 
         case #selector(NSResponder.moveUp(_:)):
@@ -572,8 +582,8 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
     /// A file row does three things depending on what is held: open it,
     /// show it in Finder, or take its path. Everything else ignores the
     /// modifiers.
-    private static func modified(_ action: CommandAction) -> CommandAction {
-        let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    private static func modified(_ action: CommandAction, modifierFlags: NSEvent.ModifierFlags) -> CommandAction {
+        let flags = modifierFlags.intersection(.deviceIndependentFlagsMask)
 
         // An app is a file too: showing one in Finder or taking its path is
         // the same question asked of a different row.
@@ -599,7 +609,9 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         return action
     }
 
-    private func activateSelection() {
+    private func activateSelection(
+        modifierFlags: NSEvent.ModifierFlags = NSApp.currentEvent?.modifierFlags ?? NSEvent.modifierFlags
+    ) {
         guard entries.indices.contains(selectedIndex) else {
             NSSound.beep()
             return
@@ -620,7 +632,7 @@ final class CommandPalettePanelController: NSObject, ShortyBoxContent, NSTextFie
         }
 
         hide()
-        actionHandler?(Self.modified(action))
+        actionHandler?(Self.modified(action, modifierFlags: modifierFlags))
     }
 
     /// Remembers what was selected while a child list is open, so coming back

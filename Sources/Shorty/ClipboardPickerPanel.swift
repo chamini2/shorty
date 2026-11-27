@@ -432,9 +432,17 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
 
             return leaveFolderIfNeeded()
 
-        case #selector(NSResponder.insertNewline(_:)),
-            #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+        case #selector(NSResponder.insertNewline(_:)):
             activateSelected(activationMode: Self.activationMode(event: NSApp.currentEvent))
+            return true
+
+        case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+            let mode = ClipboardPickerActivationMode.fromModifiers(
+                command: Self.commandModifierIsActive(event: NSApp.currentEvent),
+                shift: Self.shiftModifierIsActive(event: NSApp.currentEvent),
+                option: true
+            )
+            activateSelected(activationMode: mode)
             return true
 
         case #selector(NSResponder.cancelOperation(_:)):

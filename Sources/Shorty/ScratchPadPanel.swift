@@ -100,7 +100,7 @@ final class ScratchPadPanelController: NSObject, ShortyBoxContent, NSTextViewDel
     func boxPerformsKeyEquivalent(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-        guard event.keyCode == UInt16(kVK_Return) else {
+        guard event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_ANSI_KeypadEnter) else {
             return false
         }
 
