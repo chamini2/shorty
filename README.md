@@ -130,7 +130,7 @@ The picker is a floating panel with a search box. Choosing an item pastes it int
 | `cmd+return` | Copy to the clipboard without pasting |
 | `option+return` | Paste as plain text (no formatting) |
 | `shift+return` | Trim each line, drop empty lines, join with no separator, save as a new history item, and paste |
-| `cmd+p` | Pin or unpin the selected history entry |
+| `cmd+.` | Pin or unpin the selected history entry |
 | `shift+backspace` | Delete the selected history entry |
 | `cmd+v` / `cmd+c` / `cmd+x` / `cmd+a` | Edit the search field |
 
@@ -151,7 +151,7 @@ the search box needs for deleting to the start of the line.
   ```
 
 - Keeps plain text and rich text (RTF, HTML, etc.).
-- Pinned items (`cmd+p`) live in a `Pinned` section just above `History` and are
+- Pinned items (`cmd+.`) live in a `Pinned` section just above `History` and are
   never evicted by `history-limit`.
 - Keeps copied images, up to 10 MB each, beside the history in `ClipboardAssets/`. Pasting writes the image data, not a file path.
 - Reads the words in a copied picture, so a screenshot of an error or a page of

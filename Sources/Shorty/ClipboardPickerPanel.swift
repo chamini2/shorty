@@ -11,15 +11,17 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         static let panelWidth: CGFloat = 820
         static let listWidth: CGFloat = 320
         static let dividerWidth: CGFloat = 1
-        /// How far down the viewport the opening selection sits.
-        static let selectionContextRatio: CGFloat = 0.25
+        /// How far down the viewport the opening selection can sit while still
+        /// starting at `y = 0` so Snippets and Pinned stay visible above it.
+        static let selectionContextRatio: CGFloat = 0.60
         static let maxVisibleRows = 35
-        static let rowHeight: CGFloat = 24
-        static let headerRowHeight: CGFloat = 18
+        static let rowHeight: CGFloat = 28
+        static let headerRowHeight: CGFloat = 26
+        static let firstHeaderRowHeight: CGFloat = 20
         static let topPadding: CGFloat = 8
         static let searchHorizontalPadding: CGFloat = 8
         static let searchHeight: CGFloat = 22
-        static let searchBottomSpacing: CGFloat = 6
+        static let searchBottomSpacing: CGFloat = 4
         static let bottomPadding: CGFloat = 4
         static let nonOverflowSlack: CGFloat = 12
         static let topOffsetRatio: CGFloat = 0.20
@@ -30,6 +32,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     private let box: ShortyBoxController
     private let contentView = NSView()
     private let header = ShortyBoxHeaderView()
+    private let headerDivider = NSView()
     private var searchField: NSTextField { header.searchField }
     private let tableView = ClipboardPickerTableView()
     private let scrollView = ClipboardPickerScrollView()
@@ -99,6 +102,8 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
 
     func boxDidPresent(in window: NSWindow) {
         window.makeFirstResponder(searchField)
+        contentView.layoutSubtreeIfNeeded()
+        selectCurrentRow(anchorContextAbove: true)
     }
 
     func boxWillSuspend() {
@@ -113,7 +118,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     func boxPerformsKeyEquivalent(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-        if flags == .command, UInt32(event.keyCode) == UInt32(kVK_ANSI_P) {
+        if flags == .command, UInt32(event.keyCode) == UInt32(kVK_ANSI_Period) {
             return togglePinSelectedHistoryItem()
         }
 
@@ -244,7 +249,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
             return Metrics.rowHeight
         }
 
-        return height(for: entries[row])
+        return height(for: entries[row], at: row)
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
@@ -270,6 +275,9 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         divider.wantsLayer = true
         divider.layer?.backgroundColor = NSColor(calibratedWhite: 1, alpha: 0.08).cgColor
 
+        headerDivider.wantsLayer = true
+        headerDivider.layer?.backgroundColor = NSColor(calibratedWhite: 1, alpha: 0.08).cgColor
+
         footerDivider.wantsLayer = true
         footerDivider.layer?.backgroundColor = NSColor(calibratedWhite: 1, alpha: 0.08).cgColor
 
@@ -277,7 +285,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         footer.textColor = .secondaryLabelColor
         footer.lineBreakMode = .byTruncatingTail
 
-        for view in [header, scrollView, divider, detailView, footerDivider, footer] as [NSView] {
+        for view in [header, headerDivider, scrollView, divider, detailView, footerDivider, footer] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(view)
         }
@@ -287,19 +295,24 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
             header.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: container.trailingAnchor),
 
-            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Metrics.searchBottomSpacing),
+            headerDivider.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Metrics.searchBottomSpacing),
+            headerDivider.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            headerDivider.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            headerDivider.heightAnchor.constraint(equalToConstant: 1),
+
+            scrollView.topAnchor.constraint(equalTo: headerDivider.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.widthAnchor.constraint(equalToConstant: Metrics.listWidth),
             scrollView.bottomAnchor.constraint(equalTo: footerDivider.topAnchor, constant: -Metrics.bottomPadding),
 
             divider.leadingAnchor.constraint(equalTo: scrollView.trailingAnchor),
             divider.widthAnchor.constraint(equalToConstant: Metrics.dividerWidth),
-            divider.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            divider.topAnchor.constraint(equalTo: headerDivider.bottomAnchor),
             divider.bottomAnchor.constraint(equalTo: footerDivider.topAnchor),
 
             detailView.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
             detailView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            detailView.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            detailView.topAnchor.constraint(equalTo: headerDivider.bottomAnchor),
             detailView.bottomAnchor.constraint(equalTo: footerDivider.topAnchor),
 
             footerDivider.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
@@ -336,7 +349,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     private func updateFooter() {
         var parts: [String] = []
         if closesBoxOnSelect {
-            parts = ["↩ paste", "⌘↩ copy", "⌥↩ plain", "⇧↩ join", "⌘P pin", "⇧⌘E pad", "⇧⌫ delete"]
+            parts = ["↩ paste", "⌘↩ copy", "⌥↩ plain", "⇧↩ join", "⌘. pin", "⇧⌘E pad", "⇧⌫ delete"]
         } else {
             parts = ["↩ insert"]
         }
@@ -352,6 +365,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     private func configureTable() {
         scrollView.contentView = ClipboardPickerClipView()
 
+        tableView.style = .plain
         tableView.headerView = nil
         tableView.rowHeight = Metrics.rowHeight
         tableView.intercellSpacing = NSSize(width: 0, height: 0)
@@ -521,7 +535,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     }
 
     private func resizePanelForCurrentEntries() {
-        let documentContentHeight = entries.reduce(CGFloat(0)) { $0 + height(for: $1) }
+        let documentContentHeight = entries.enumerated().reduce(CGFloat(0)) { $0 + height(for: $1.element, at: $1.offset) }
         let documentHeight = max(documentContentHeight + Metrics.nonOverflowSlack, Metrics.rowHeight)
 
         contentView.layoutSubtreeIfNeeded()
@@ -735,15 +749,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         }
 
         let lastPosition = selectableIndices.index(before: selectableIndices.endIndex)
-        let nextPosition: Int
-
-        if offset < 0, currentPosition == selectableIndices.startIndex {
-            nextPosition = lastPosition
-        } else if offset > 0, currentPosition == lastPosition {
-            nextPosition = selectableIndices.startIndex
-        } else {
-            nextPosition = min(max(currentPosition + offset, selectableIndices.startIndex), lastPosition)
-        }
+        let nextPosition = min(max(currentPosition + offset, selectableIndices.startIndex), lastPosition)
 
         selectedIndex = selectableIndices[nextPosition]
         selectCurrentRow()
@@ -795,7 +801,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
     }
 
     /// Pins or unpins the selected history entry and keeps selection on it so
-    /// the user immediately sees where it moved (and can press `⌘P` again to undo).
+    /// the user immediately sees where it moved (and can press `⌘.` again to undo).
     private func togglePinSelectedHistoryItem() -> Bool {
         guard let onTogglePin,
               entries.indices.contains(selectedIndex),
@@ -940,22 +946,35 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
 
         if anchorContextAbove {
             scrollKeepingContextAboveSelection()
+        } else if selectedIndex == firstSelectableIndex() {
+            scrollView.contentView.scroll(to: .zero)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        } else if selectedIndex > 0, case .header = entries[selectedIndex - 1] {
+            let rect = tableView.rect(ofRow: selectedIndex - 1).union(tableView.rect(ofRow: selectedIndex))
+            tableView.scrollToVisible(rect)
         } else {
             tableView.scrollRowToVisible(selectedIndex)
         }
     }
 
-    /// Opening on the newest history item would otherwise scroll the snippets
-    /// off the top. Leave the selected row a little way down the viewport so
-    /// whatever sits above it stays in view.
+    /// Opening on the newest history item would otherwise scroll Snippets and
+    /// Pinned off the top. Keep the list at `y = 0` whenever the initial
+    /// selection fits in the upper part of the viewport; otherwise leave a
+    /// slice of context above it.
     private func scrollKeepingContextAboveSelection() {
-        let rowRect = tableView.rect(ofRow: selectedIndex)
         let viewportHeight = scrollView.contentView.bounds.height
-        let maximumOffset = max(0, tableView.frame.height - viewportHeight)
-        let offset = min(
-            max(0, rowRect.minY - viewportHeight * Metrics.selectionContextRatio),
-            maximumOffset
-        )
+        guard viewportHeight > 0 else {
+            return
+        }
+
+        let rowRect = tableView.rect(ofRow: selectedIndex)
+        let offset: CGFloat
+        if rowRect.maxY <= viewportHeight * Metrics.selectionContextRatio {
+            offset = 0
+        } else {
+            let maximumOffset = max(0, tableView.frame.height - viewportHeight)
+            offset = min(max(0, rowRect.minY - viewportHeight * 0.25), maximumOffset)
+        }
 
         scrollView.contentView.scroll(to: NSPoint(x: 0, y: offset))
         scrollView.reflectScrolledClipView(scrollView.contentView)
@@ -963,10 +982,17 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
 
     private func makeCell(for entry: ClipboardPickerEntry) -> NSView {
         let presentation = entry.presentation
+        let isHeader: Bool
         let isPinned: Bool
-        if case let .history(item) = entry {
+        switch entry {
+        case .header:
+            isHeader = true
+            isPinned = false
+        case let .history(item):
+            isHeader = false
             isPinned = item.isPinned
-        } else {
+        default:
+            isHeader = false
             isPinned = false
         }
 
@@ -975,6 +1001,7 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
             trailingLabel: presentation.trailingLineCountLabel,
             textColor: textColor(for: entry),
             icon: image(for: entry),
+            isHeader: isHeader,
             showsDisclosure: showsDisclosure(for: entry),
             isPinned: isPinned,
             layoutWidthLimit: Metrics.panelWidth
@@ -990,10 +1017,10 @@ final class ClipboardPickerPanelController: NSObject, ShortyBoxContent, NSTableV
         }
     }
 
-    private func height(for entry: ClipboardPickerEntry) -> CGFloat {
+    private func height(for entry: ClipboardPickerEntry, at row: Int) -> CGFloat {
         switch entry {
         case .header:
-            return Metrics.headerRowHeight
+            return row == 0 ? Metrics.firstHeaderRowHeight : Metrics.headerRowHeight
         case .folder, .history, .snippet, .back, .empty:
             return Metrics.rowHeight
         }
@@ -1086,8 +1113,9 @@ private final class ClipboardPickerRowView: NSTableRowView {
             return
         }
 
-        NSColor.systemBlue.setFill()
-        bounds.insetBy(dx: 0, dy: 1).fill()
+        NSColor(calibratedWhite: 1, alpha: 0.12).setFill()
+        let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 8, dy: 1), xRadius: 6, yRadius: 6)
+        pill.fill()
     }
 }
 
@@ -1095,20 +1123,25 @@ private final class ClipboardPickerRowView: NSTableRowView {
 private final class ClipboardPickerCellView: NSTableCellView {
     private enum Metrics {
         static let iconSize: CGFloat = 16
-        static let iconLeading: CGFloat = 0
-        static let textSpacing: CGFloat = 4
-        static let trailingPadding: CGFloat = 30
-        static let headerLeading: CGFloat = 0
+        static let iconLeading: CGFloat = 14
+        static let textSpacing: CGFloat = 7
+        static let trailingPadding: CGFloat = 14
+        static let headerLeading: CGFloat = 14
+        static let headerBottomPadding: CGFloat = 3
         static let disclosureSize: CGFloat = 12
-        static let disclosureTrailing: CGFloat = 24
-        static let disclosureSpacing: CGFloat = 8
+        static let disclosureTrailing: CGFloat = 14
+        static let disclosureSpacing: CGFloat = 6
     }
 
     private let title: String
     private let trailingLabel: String?
     private let textColor: NSColor
-    private let font = NSFont.systemFont(ofSize: 13)
+    private let font = NSFont.systemFont(ofSize: 13, weight: .regular)
+    private let selectedFont = NSFont.systemFont(ofSize: 13, weight: .medium)
+    private let headerFont = NSFont.systemFont(ofSize: 10.5, weight: .semibold)
+    private let trailingFont = NSFont.systemFont(ofSize: 11.5, weight: .regular)
     private let iconView: NSImageView?
+    private let isHeader: Bool
     private let showsDisclosure: Bool
     private let isPinned: Bool
     private let layoutWidthLimit: CGFloat
@@ -1118,6 +1151,7 @@ private final class ClipboardPickerCellView: NSTableCellView {
         trailingLabel: String?,
         textColor: NSColor,
         icon: NSImage?,
+        isHeader: Bool,
         showsDisclosure: Bool,
         isPinned: Bool,
         layoutWidthLimit: CGFloat
@@ -1125,6 +1159,7 @@ private final class ClipboardPickerCellView: NSTableCellView {
         self.title = title
         self.trailingLabel = trailingLabel
         self.textColor = textColor
+        self.isHeader = isHeader
         self.showsDisclosure = showsDisclosure
         self.isPinned = isPinned
         self.layoutWidthLimit = layoutWidthLimit
@@ -1151,17 +1186,13 @@ private final class ClipboardPickerCellView: NSTableCellView {
 
     override var backgroundStyle: NSView.BackgroundStyle {
         didSet {
-            if isPinned {
-                needsDisplay = true
-            }
+            needsDisplay = true
         }
     }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
-        let textHeight = ceil(font.ascender - font.descender + font.leading)
-        let textY = floor((bounds.height - textHeight) / 2)
         let visibleWidth = enclosingScrollView?.contentSize.width
         let layoutWidth = max(
             1,
@@ -1171,6 +1202,24 @@ private final class ClipboardPickerCellView: NSTableCellView {
                 visibleWidth.flatMap { $0 > 0 ? $0 : nil } ?? layoutWidthLimit
             )
         )
+
+        if isHeader {
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: headerFont,
+                .foregroundColor: NSColor.tertiaryLabelColor,
+                .kern: 0.5,
+            ]
+            let label = title.uppercased() as NSString
+            let textHeight = ceil(headerFont.ascender - headerFont.descender + headerFont.leading)
+            let textY = max(0, bounds.height - textHeight - Metrics.headerBottomPadding)
+            label.draw(at: NSPoint(x: Metrics.headerLeading, y: textY), withAttributes: attributes)
+            return
+        }
+
+        let isSelected = backgroundStyle == .emphasized
+        let activeFont = isSelected ? selectedFont : font
+        let textHeight = ceil(activeFont.ascender - activeFont.descender + activeFont.leading)
+        let textY = floor((bounds.height - textHeight) / 2)
         let textStart: CGFloat
         var textEnd = layoutWidth - Metrics.trailingPadding
 
@@ -1201,7 +1250,7 @@ private final class ClipboardPickerCellView: NSTableCellView {
                 width: Metrics.disclosureSize,
                 height: Metrics.disclosureSize
             )
-            drawDisclosure(in: rect)
+            drawDisclosure(in: rect, isSelected: isSelected)
             textEnd = rect.minX - Metrics.disclosureSpacing
         } else if isPinned {
             let rect = NSRect(
@@ -1216,22 +1265,29 @@ private final class ClipboardPickerCellView: NSTableCellView {
 
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineBreakMode = .byClipping
+        let resolvedTextColor: NSColor = isSelected ? .labelColor : textColor.withAlphaComponent(0.85)
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: textColor,
+            .font: activeFont,
+            .foregroundColor: resolvedTextColor,
             .paragraphStyle: paragraphStyle,
         ]
         if let trailingLabel {
+            let trailingAttributes: [NSAttributedString.Key: Any] = [
+                .font: trailingFont,
+                .foregroundColor: isSelected ? NSColor.secondaryLabelColor : NSColor.tertiaryLabelColor,
+                .paragraphStyle: paragraphStyle,
+            ]
             let marker = trailingLabel as NSString
-            let markerWidth = ceil(marker.size(withAttributes: attributes).width)
+            let markerWidth = ceil(marker.size(withAttributes: trailingAttributes).width)
+            let markerHeight = ceil(trailingFont.ascender - trailingFont.descender + trailingFont.leading)
             let markerX = max(textStart, textEnd - markerWidth)
             let markerRect = NSRect(
                 x: markerX,
-                y: textY,
+                y: floor((bounds.height - markerHeight) / 2),
                 width: markerWidth,
-                height: textHeight
+                height: markerHeight
             )
-            marker.draw(at: markerRect.origin, withAttributes: attributes)
+            marker.draw(at: markerRect.origin, withAttributes: trailingAttributes)
             textEnd = markerRect.minX - Metrics.textSpacing
         }
 
@@ -1279,14 +1335,18 @@ private final class ClipboardPickerCellView: NSTableCellView {
         )
     }
 
-    private func drawDisclosure(in rect: NSRect) {
-        NSColor.labelColor.setFill()
-        let path = NSBezierPath()
-        path.move(to: NSPoint(x: rect.midX - 3, y: rect.midY - 5))
-        path.line(to: NSPoint(x: rect.midX + 4, y: rect.midY))
-        path.line(to: NSPoint(x: rect.midX - 3, y: rect.midY + 5))
-        path.close()
-        path.fill()
+    private func drawDisclosure(in rect: NSRect, isSelected: Bool) {
+        let chevron = "›" as NSString
+        let chevronFont = NSFont.systemFont(ofSize: 14, weight: .regular)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: chevronFont,
+            .foregroundColor: isSelected ? NSColor.secondaryLabelColor : NSColor.tertiaryLabelColor,
+        ]
+        let size = chevron.size(withAttributes: attributes)
+        chevron.draw(
+            at: NSPoint(x: rect.maxX - size.width, y: floor((bounds.height - size.height) / 2)),
+            withAttributes: attributes
+        )
     }
 
     private func truncatedTitle(
