@@ -168,11 +168,11 @@ public final class ShortyDatabase: @unchecked Sendable {
     public func setMetaValue(_ value: String?, for key: String) {
         locked {
             guard let value else {
-                try? sqlite.run("DELETE FROM meta WHERE key = ?", [.text(key)])
+                _ = try? sqlite.run("DELETE FROM meta WHERE key = ?", [.text(key)])
                 return
             }
 
-            try? sqlite.run(
+            _ = try? sqlite.run(
                 "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 [.text(key), .text(value)]
             )

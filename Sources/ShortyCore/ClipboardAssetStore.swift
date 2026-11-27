@@ -46,7 +46,7 @@ public struct ClipboardFileReference: Codable, Equatable, Sendable {
     }
 }
 
-public final class ClipboardAssetStore {
+public final class ClipboardAssetStore: @unchecked Sendable {
     private let directory: URL
     private let fileManager: FileManager
 

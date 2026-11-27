@@ -230,7 +230,7 @@ private struct Parser {
     /// `0.2`, and `(3)(4)` is not multiplication by juxtaposition, which only
     /// ever surprises people.
     private mutating func parsePostfix() -> Double? {
-        guard var value = parsePrimary() else {
+        guard let value = parsePrimary() else {
             return nil
         }
 
