@@ -26,15 +26,14 @@ public final class KeepAwake {
         token != nil
     }
 
-    /// Idle sleep and display sleep both, since a screen that goes dark is
-    /// usually what people mean by the machine sleeping.
+    /// Holds off idle system sleep while still letting the display turn off.
     public func start() {
         guard token == nil else {
             return
         }
 
         token = processInfo.beginActivity(
-            options: [.idleSystemSleepDisabled, .idleDisplaySleepDisabled],
+            options: [.idleSystemSleepDisabled],
             reason: reason
         )
     }
